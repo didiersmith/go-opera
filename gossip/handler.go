@@ -881,8 +881,20 @@ func (h *handler) handleTxHashes(p *peer, announces []common.Hash) {
 
 func (h *handler) handleTxs(p *peer, txs types.Transactions) {
 	// Mark the hashes as present at the remote node
+	// special := [][]byte{
+	// 	[]byte{0xf4, 0x91, 0xe7, 0xb6, 0x9e, 0x42, 0x44, 0xad, 0x40, 0x02, 0xbc, 0x14, 0xe8, 0x78, 0xa3, 0x42, 0x07, 0xe3, 0x8c, 0x29},
+	// }
 	for _, tx := range txs {
 		p.MarkTransaction(tx.Hash())
+		// to := tx.To()
+		// if to != nil {
+		// 	toBytes := to.Bytes()
+		// 	for _, cmp := range special {
+		// 		if bytes.Compare(cmp, toBytes) == 0 {
+		// 			log.Info("Found tx on watched addr", "to", to, "hash", tx.Hash())
+		// 		}
+		// 	}
+		// }
 	}
 	h.txpool.AddRemotes(txs)
 }
@@ -1363,15 +1375,35 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 
 	// Broadcast transactions to a batch of peers not knowing about it
 	totalSize := common.StorageSize(0)
+	containsLocalTx := false
 	for _, tx := range txs {
+		to := tx.To()
+		hash := tx.Hash()
+		if (to != nil && to[0] == 0xba && to[1] == 0x16 && to[2] == 0x4f) {
+			log.Info("Detected local tx", "hash", hash)
+			containsLocalTx = true
+		}
 		peers := h.peers.PeersWithoutTx(tx.Hash())
-		for _, peer := range peers {
+		for i, peer := range peers {
 			txset[peer] = append(txset[peer], tx)
+			if (!containsLocalTx && i > 10) {
+				break; // Non-local txs are low priority.
+			}
 		}
 		totalSize += tx.Size()
-		log.Trace("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+		if (containsLocalTx) {
+			log.Info("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+		}
 	}
-	fullRecipients := h.decideBroadcastAggressiveness(int(totalSize), time.Second, len(txset))
+	if (len(txset) == 0) {
+		return;
+	}
+	fullRecipients := len(txset)
+	if containsLocalTx {
+		log.Info("Broadcasting", "peers", len(txset), "full recipients", fullRecipients, "transactions", len(txs))
+	} else {
+		fullRecipients = h.decideBroadcastAggressiveness(int(totalSize), time.Second, len(txset))
+	}
 	i := 0
 	for peer, txs := range txset {
 		SplitTransactions(txs, func(batch types.Transactions) {

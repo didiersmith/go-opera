@@ -149,8 +149,8 @@ func DefaultConfig(scale cachescale.Func) Config {
 		HeavyCheck: heavycheck.DefaultConfig(),
 
 		Protocol: ProtocolConfig{
-			LatencyImportance:    60,
-			ThroughputImportance: 40,
+			LatencyImportance:    0,
+			ThroughputImportance: 100,
 			MsgsSemaphoreLimit: dag.Metric{
 				Num:  scale.Events(1000),
 				Size: scale.U64(30 * opt.MiB),

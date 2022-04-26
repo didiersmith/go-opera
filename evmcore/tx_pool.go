@@ -17,6 +17,7 @@
 package evmcore
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"math/big"
@@ -674,12 +675,18 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	// Make the local flag. If it's from local source or it's from the network but
 	// the sender is marked as local previously, treat it as the local transaction.
 	isLocal := local || pool.locals.containsTx(tx)
+	if isLocal {
+		log.Info("Detected new local tx", "hash", hash, "local", local)
+	}
 
 	// If the transaction fails basic validation, discard it
 	if err := pool.validateTx(tx, isLocal); err != nil {
 		log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
 		invalidTxMeter.Mark(1)
 		return false, err
+	}
+	if isLocal {
+		log.Info("Validated local tx", "hash", hash)
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
@@ -737,18 +744,25 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	if err != nil {
 		return false, err
 	}
+	if isLocal {
+		log.Info("Enqueued tx", "hash", hash)
+	}
 	// Mark local addresses and journal local transactions
 	if local && !pool.locals.contains(from) {
 		log.Info("Setting new local account", "address", from)
 		pool.locals.add(from)
+		log.Info("Setting new local account", "address", from)
 		pool.priced.Removed(pool.all.RemoteToLocals(pool.locals)) // Migrate the remotes if it's marked as local first time.
 	}
 	if isLocal {
 		localGauge.Inc(1)
+		log.Info("Journaling local tx")
 	}
 	pool.journalTx(from, tx)
 
-	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
+	if isLocal {
+		log.Info("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
+	}
 	return replaced, nil
 }
 
@@ -760,6 +774,9 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 	from, _ := types.Sender(pool.signer, tx) // already validated
 	if pool.queue[from] == nil {
 		pool.queue[from] = newTxList(false)
+		if local {
+			log.Info("Added newTxList", "from", from)
+		}
 	}
 	inserted, old := pool.queue[from].Add(tx, pool.config.PriceBump)
 	if !inserted {
@@ -782,8 +799,14 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 		log.Error("Missing transaction in lookup set, please report the issue", "hash", hash)
 	}
 	if addAll {
+		if local {
+			log.Info("Adding to pool lookup", "hash", hash)
+		}
 		pool.all.Add(tx, local)
 		pool.priced.Put(tx, local)
+		if local {
+			log.Info("Finished adding to pool", "hash", hash)
+		}
 	}
 	// If we never record the heartbeat, do it right now.
 	if _, exist := pool.beats[from]; !exist {
@@ -846,6 +869,7 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 // This method is used to add transactions from the RPC API and performs synchronous pool
 // reorganization and event propagation.
 func (pool *TxPool) AddLocals(txs []*types.Transaction) []error {
+	log.Info("AddLocals", "length", len(txs))
 	return pool.addTxs(txs, !pool.config.NoLocals, true)
 }
 
@@ -885,6 +909,49 @@ func (pool *TxPool) AddRemote(tx *types.Transaction) error {
 	return errs[0]
 }
 
+func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) {
+	specialAddrs := [][]byte{
+		[]byte{0xf4, 0x91, 0xe7, 0xb6, 0x9e, 0x42, 0x44, 0xad, 0x40, 0x02, 0xbc, 0x14, 0xe8, 0x78, 0xa3, 0x42, 0x07, 0xe3, 0x8c, 0x29},
+		[]byte{0xd8, 0xFc, 0x01, 0x24, 0x98, 0xF4, 0x27, 0x80, 0x95, 0xF1, 0x01, 0x90, 0xDD, 0x3F, 0x29, 0xa8, 0xA2, 0xf1, 0x6a, 0x52},
+	}
+	specialMethods := [][]byte{
+		[]byte{0x38, 0xed, 0x17, 0x39},
+		[]byte{0x88, 0x03, 0xdb, 0xee},
+		[]byte{0x18, 0xcb, 0xaf, 0xe5},
+		[]byte{0x7f, 0xf3, 0x6a, 0xb5},
+		[]byte{0xfb, 0x3b, 0xdb, 0x41},
+		[]byte{0x4a, 0x25, 0xd9, 0x4a},
+	}
+	to := tx.To()
+	if to == nil {
+		return
+	}
+	toBytes := to.Bytes()
+	for i, cmp := range specialAddrs {
+		if bytes.Compare(cmp, toBytes) != 0 {
+			continue
+		}
+		data := tx.Data()
+		if len(data) < 4 {
+			continue
+		}
+		if i == 1 {
+			log.Info("Found Mr Million tx", "hash", tx.Hash())
+			break
+		}
+		for _, cmpMethod := range specialMethods {
+			if bytes.Compare(cmpMethod, data[:4]) != 0 {
+				continue
+			}
+			from, err := types.Sender(pool.signer, tx)
+			if err != nil {
+				log.Info("Could not get signer for", "hash", tx.Hash())
+			}
+			log.Info("Found tx on watched addr", "to", to, "hash", tx.Hash(), "method", data[:4], "nonce", tx.Nonce(), "from", from)
+		}
+	}
+}
+
 // addTxs attempts to queue a batch of transactions if they are valid.
 func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	// Filter out known ones without obtaining the pool lock or recovering signatures
@@ -914,10 +981,28 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		return errs
 	}
 
+	for _, tx := range news {
+		pool.hackCheckIncomingTx(tx)
+	}
 	// Process all the new transaction and merge any errors into the original slice
+	if local {
+		log.Info("Grabbing pool.mu for local txs", "len", len(txs))
+	}
 	pool.mu.Lock()
+	if local {
+		log.Info("Grabbed pool.mu for local txs", "len", len(txs))
+	}
 	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
+	var promoted []*types.Transaction
+	if local {
+		log.Info("Doing crazy reorg for local txs")
+		promoted = pool.hackRunReorgFast(dirtyAddrs)
+	}
 	pool.mu.Unlock()
+	if local {
+		log.Info("Calling hackNotifyNewTxs", "len(promoted)", len(promoted))
+		pool.hackNotifyNewTxs(promoted)
+	}
 
 	var nilSlot = 0
 	for _, err := range newErrs {
@@ -928,9 +1013,17 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		nilSlot++
 	}
 	// Reorg the pool internals if needed and return
-	done := pool.requestPromoteExecutables(dirtyAddrs)
-	if sync {
-		<-done
+	if !local {
+		done := pool.requestPromoteExecutables(dirtyAddrs)
+		if sync {
+			<-done
+			if local {
+				log.Info("pool.requestPromoteExecutables finished for local tx")
+			}
+		}
+	}
+	if local {
+		log.Info("Returning from addTxs")
 	}
 	return errs
 }
@@ -1141,6 +1234,42 @@ func (pool *TxPool) scheduleReorgLoop() {
 	}
 }
 
+// pool.mu must be held when calling this function
+func (pool *TxPool) hackRunReorgFast(dirtyAccounts *accountSet) []*types.Transaction {
+	log.Info("Running hackRunReorgFast")
+	var promoteAddrs []common.Address = dirtyAccounts.flatten()
+	promoted := pool.promoteExecutables(promoteAddrs)
+	pool.truncatePending()
+	pool.truncateQueue()
+
+	// Update all accounts to the latest known pending nonce
+	for addr, list := range pool.pending {
+		highestPending := list.LastElement()
+		pool.pendingNonces.set(addr, highestPending.Nonce()+1)
+	}
+	return promoted
+}
+
+// Do not hold pool.mu when calling
+func (pool *TxPool) hackNotifyNewTxs(promoted []*types.Transaction) {
+	// Notify subsystems for newly added transactions
+	events := make(map[common.Address]*txSortedMap)
+	for _, tx := range promoted {
+		addr, _ := types.Sender(pool.signer, tx)
+		if _, ok := events[addr]; !ok {
+			events[addr] = newTxSortedMap()
+		}
+		events[addr].Put(tx)
+	}
+	if len(events) > 0 {
+		var txs []*types.Transaction
+		for _, set := range events {
+			txs = append(txs, set.Flatten()...)
+		}
+		pool.txFeed.Send(NewTxsNotify{txs})
+	}
+}
+
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap) {
 	defer close(done)
@@ -1346,6 +1475,9 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		readies := list.Ready(pool.pendingNonces.get(addr))
 		for _, tx := range readies {
 			hash := tx.Hash()
+			if addr[0] == 0xde && addr[1] == 0xca {
+				log.Info("Promoting decaf transaction", "hash", hash);
+			}
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
 			}
@@ -1810,7 +1942,13 @@ func (t *txLookup) Slots() int {
 
 // Add adds a transaction to the lookup.
 func (t *txLookup) Add(tx *types.Transaction, local bool) {
+	if (local) {
+		log.Info("Grabbing lock");
+	}
 	t.lock.Lock()
+	if (local) {
+		log.Info("Grabbed lock");
+	}
 	defer t.lock.Unlock()
 
 	t.slots += numSlots(tx)
