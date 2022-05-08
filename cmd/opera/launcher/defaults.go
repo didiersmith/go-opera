@@ -43,6 +43,7 @@ var NodeDefaultConfig = node.Config{
 		ListenAddr:  fmt.Sprintf(":%d", DefaultP2PPort),
 		MaxPeers:    50,
 		NAT:         nat.Any(),
+		DialRatio:   2,
 	},
 }
 

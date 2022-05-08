@@ -338,6 +338,7 @@ func makeConfigNode(ctx *cli.Context, cfg *node.Config) *node.Node {
 	if err != nil {
 		utils.Fatalf("Failed to create the protocol stack: %v", err)
 	}
+	log.Info("Created node", "server MaxPeers", stack.Server().Config.MaxPeers, "DialRatio", stack.Server().Config.DialRatio, "MaxPendingPeers", stack.Server().Config.MaxPendingPeers)
 
 	return stack
 }

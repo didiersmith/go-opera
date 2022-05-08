@@ -428,9 +428,11 @@ func consensusCallbackBeginBlockFn(
 					blockInsertTimer.UpdateSince(start)
 
 					now := time.Now()
-					log.Info("New block", "index", blockCtx.Idx, "id", block.Atropos, "gas_used",
-						evmBlock.GasUsed, "txs", fmt.Sprintf("%d/%d", len(evmBlock.Transactions), len(block.SkippedTxs)),
-						"age", utils.PrettyDuration(now.Sub(block.Time.Time())), "t", utils.PrettyDuration(now.Sub(start)))
+					if blockCtx.Idx%60 == 0 {
+						log.Info("New block", "index", blockCtx.Idx, "id", block.Atropos, "gas_used",
+							evmBlock.GasUsed, "txs", fmt.Sprintf("%d/%d", len(evmBlock.Transactions), len(block.SkippedTxs)),
+							"age", utils.PrettyDuration(now.Sub(block.Time.Time())), "t", utils.PrettyDuration(now.Sub(start)))
+					}
 				}
 				if confirmedEvents.Len() != 0 {
 					atomic.StoreUint32(blockBusyFlag, 1)

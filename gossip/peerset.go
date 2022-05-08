@@ -23,6 +23,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/hash"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 )
 
@@ -44,6 +45,10 @@ var (
 	errSnapWithoutOpera = errors.New("peer connected on snap without compatible opera support")
 )
 
+const (
+	maxPeersReturned = 30
+)
+
 // peerSet represents the collection of active peers currently participating in
 // the `eth` protocol, with or without the `snap` extension.
 type peerSet struct {
@@ -53,8 +58,10 @@ type peerSet struct {
 	snapWait map[string]chan *snap.Peer // Peers connected on `eth` waiting for their snap extension
 	snapPend map[string]*snap.Peer      // Peers connected on the `snap` protocol, but not yet on `eth`
 
-	lock   sync.RWMutex
-	closed bool
+	lock          sync.RWMutex
+	closed        bool
+	sortedPeers   []string // Peers sorted in order of event speed
+	sortedTxPeers []string // Peers sorted in order of tx speed
 }
 
 // newPeerSet creates a new peer set to track the active participants.
@@ -64,6 +71,61 @@ func newPeerSet() *peerSet {
 		snapWait: make(map[string]chan *snap.Peer),
 		snapPend: make(map[string]*snap.Peer),
 	}
+}
+
+// Dexter
+func (ps *peerSet) SetSortedPeers(sortedPeers []string) {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	ps.sortedPeers = sortedPeers
+}
+
+// Dexter
+func (ps *peerSet) GetSortedPeers() []*peer {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	list := make([]*peer, 0, len(ps.sortedPeers))
+	marked := make(map[string]struct{})
+	for _, id := range ps.sortedPeers {
+		if peer, ok := ps.peers[id]; ok {
+			list = append(list, peer)
+			marked[id] = struct{}{}
+		}
+	}
+	for id, p := range ps.peers {
+		if _, ok := marked[id]; !ok {
+			list = append(list, p)
+		}
+	}
+	return list
+}
+
+// Dexter
+func (ps *peerSet) SetSortedTxPeers(sortedTxPeers []string) {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	ps.sortedTxPeers = sortedTxPeers
+}
+
+// Dexter
+func (ps *peerSet) GetSortedTxPeers() []*peer {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	list := make([]*peer, 0, len(ps.sortedTxPeers))
+	for _, id := range ps.sortedTxPeers {
+		if peer, ok := ps.peers[id]; ok {
+			list = append(list, peer)
+		}
+	}
+	return list
+}
+
+// Dexter
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // RegisterSnapExtension unblocks an already connected `eth` peer waiting for its
@@ -185,10 +247,15 @@ func (ps *peerSet) PeersWithoutEvent(e hash.Event) []*peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
-	list := make([]*peer, 0, len(ps.peers))
+	list := make([]*peer, 0, maxPeersReturned)
+	i := 0
 	for _, p := range ps.peers {
 		if p.InterestedIn(e) {
 			list = append(list, p)
+			i++
+			if i >= maxPeersReturned {
+				break
+			}
 		}
 	}
 	return list
@@ -200,10 +267,15 @@ func (ps *peerSet) PeersWithoutTx(hash common.Hash) []*peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
-	list := make([]*peer, 0, len(ps.peers))
+	list := make([]*peer, 0, maxPeersReturned)
+	i := 0
 	for _, p := range ps.peers {
 		if !p.knownTxs.Contains(hash) {
 			list = append(list, p)
+			i++
+			if i >= maxPeersReturned {
+				break
+			}
 		}
 	}
 	return list
@@ -248,4 +320,20 @@ func (ps *peerSet) Close() {
 		p.Disconnect(p2p.DiscQuitting)
 	}
 	ps.closed = true
+}
+
+// Dexter
+func (ps *peerSet) Cull(peerIds []string) {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	for _, peerId := range peerIds {
+		peer, ok := ps.peers[peerId]
+		if !ok {
+			log.Warn("Could not find peer", "peerId", peerId)
+			continue
+		}
+		// log.Info("Disconnecting from loser peer", "peerId", peerId, "ID", peer.ID())
+		peer.Disconnect(p2p.DiscUselessPeer)
+	}
 }

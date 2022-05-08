@@ -60,6 +60,7 @@ type peer struct {
 	knownTxs            mapset.Set         // Set of transaction hashes known to be known by this peer
 	knownEvents         mapset.Set         // Set of event hashes known to be known by this peer
 	queue               chan broadcastItem // queue of items to send
+	fastQueue           chan broadcastItem // queue of high priority items to send
 	queuedDataSemaphore *datasemaphore.DataSemaphore
 	term                chan struct{} // Termination channel to stop the broadcaster
 
@@ -70,6 +71,7 @@ type peer struct {
 	snapWait chan struct{} // Notification channel for snap connections
 
 	sync.RWMutex
+	created time.Time
 }
 
 func (p *peer) SetProgress(x PeerProgress) {
@@ -108,11 +110,13 @@ func newPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, cfg PeerCacheConfi
 		knownTxs:            mapset.NewSet(),
 		knownEvents:         mapset.NewSet(),
 		queue:               make(chan broadcastItem, cfg.MaxQueuedItems),
+		fastQueue:           make(chan broadcastItem, cfg.MaxQueuedItems),
 		queuedDataSemaphore: datasemaphore.New(dag.Metric{cfg.MaxQueuedItems, cfg.MaxQueuedSize}, getSemaphoreWarningFn("Peers queue")),
 		term:                make(chan struct{}),
+		created:             time.Now(),
 	}
 
-	go peer.broadcast(peer.queue)
+	go peer.broadcast(peer.queue, peer.fastQueue)
 
 	return peer
 }
@@ -120,9 +124,13 @@ func newPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, cfg PeerCacheConfi
 // broadcast is a write loop that multiplexes event propagations, announcements
 // and transaction broadcasts into the remote peer. The goal is to have an async
 // writer that does not lock up node internals.
-func (p *peer) broadcast(queue chan broadcastItem) {
+func (p *peer) broadcast(queue, fastQueue chan broadcastItem) {
 	for {
 		select {
+		case item := <-fastQueue:
+			_ = p2p.Send(p.rw, item.Code, item.Raw)
+			p.queuedDataSemaphore.Release(memSize(item.Raw))
+
 		case item := <-queue:
 			_ = p2p.Send(p.rw, item.Code, item.Raw)
 			p.queuedDataSemaphore.Release(memSize(item.Raw))

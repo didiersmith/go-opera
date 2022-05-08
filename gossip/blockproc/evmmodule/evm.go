@@ -56,6 +56,10 @@ type OperaEVMProcessor struct {
 	receipts    types.Receipts
 }
 
+func (p *OperaEVMProcessor) EvmBlockWith(txs types.Transactions) *evmcore.EvmBlock {
+	return p.evmBlockWith(txs)
+}
+
 func (p *OperaEVMProcessor) evmBlockWith(txs types.Transactions) *evmcore.EvmBlock {
 	baseFee := p.net.Economy.MinGasPrice
 	if !p.net.Upgrades.London {

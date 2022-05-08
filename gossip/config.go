@@ -181,12 +181,12 @@ func DefaultConfig(scale cachescale.Func) Config {
 			},
 			TxFetcher: itemsfetcher.Config{
 				ForgetTimeout:       1 * time.Minute,
-				ArriveTimeout:       1000 * time.Millisecond,
+				ArriveTimeout:       200 * time.Millisecond, // originally time.Second
 				GatherSlack:         100 * time.Millisecond,
 				HashLimit:           10000,
 				MaxBatch:            scale.I(512),
-				MaxQueuedBatches:    scale.I(32),
-				MaxParallelRequests: 64,
+				MaxQueuedBatches:    scale.I(64),
+				MaxParallelRequests: 2048,
 			},
 			DagStreamLeecher:         dagstreamleecher.DefaultConfig(),
 			DagStreamSeeder:          dagstreamseeder.DefaultConfig(scale),

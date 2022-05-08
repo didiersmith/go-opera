@@ -189,6 +189,12 @@ type handler struct {
 	started sync.WaitGroup
 
 	logger.Instance
+
+	// Dexter
+	eventCh       chan *inter.EventPayload
+	eventRaceChan chan *RaceEntry
+	txRaceChan    chan *RaceEntry
+	dexterTxChan  chan *types.Transaction
 }
 
 // newHandler returns a new Fantom sub protocol manager. The Fantom sub protocol manages peers capable
@@ -615,7 +621,7 @@ func (h *handler) unregisterPeer(id string) {
 	if peer == nil {
 		return
 	}
-	log.Debug("Removing peer", "peer", id)
+	log.Debug("Removing peer", "peer", id, "name", peer.Name())
 
 	// Unregister the peer from the leecher's and seeder's and peer sets
 	_ = h.epLeecher.UnregisterPeer(id)
@@ -789,7 +795,7 @@ func (h *handler) handle(p *peer) error {
 	if h.peers.Len() >= h.maxPeers && !p.Peer.Info().Network.Trusted {
 		return p2p.DiscTooManyPeers
 	}
-	p.Log().Debug("Peer connected", "name", p.Name())
+	p.Log().Debug("Peer connected", "name", p.Peer.Name(), "ID", p.Peer.ID(), "eid", p.Peer.Node().ID())
 
 	// Register the peer locally
 	if err := h.peers.RegisterPeer(p, snap); err != nil {
@@ -829,7 +835,7 @@ func (h *handler) handle(p *peer) error {
 	// Handle incoming messages until the connection is torn down
 	for {
 		if err := h.handleMsg(p); err != nil {
-			p.Log().Debug("Message handling failed", "err", err)
+			p.Log().Debug("Message handling failed", "name", p.Name(), "err", err)
 			return err
 		}
 	}
@@ -871,21 +877,46 @@ func (h *handler) handleTxHashes(p *peer, announces []common.Hash) {
 	// Mark the hashes as present at the remote node
 	for _, id := range announces {
 		p.MarkTransaction(id)
+		if h.txRaceChan != nil {
+			h.txRaceChan <- &RaceEntry{
+				Hash:   id,
+				PeerID: p.id,
+				T:      time.Now(),
+			}
+		}
 	}
 	// Schedule all the unknown hashes for retrieval
 	requestTransactions := func(ids []interface{}) error {
 		return p.RequestTransactions(interfacesToTxids(ids))
 	}
-	_ = h.txFetcher.NotifyAnnounces(p.id, txidsToInterfaces(announces), time.Now(), requestTransactions)
+	interfaces := txidsToInterfaces(announces)
+	_ = h.txFetcher.NotifyAnnounces(p.id, interfaces, time.Now(), requestTransactions)
+	// Dexter: Ask other peers for TX as well.
+	for _, peer := range h.peers.GetSortedTxPeers() {
+		peerRequestTransactions := func(ids []interface{}) error {
+			return peer.RequestTransactions(interfacesToTxids(ids))
+		}
+		_ = h.txFetcher.NotifyAnnounces(peer.id, interfaces, time.Now(), peerRequestTransactions)
+	}
+}
+
+// Dexter
+func (h *handler) AttachDexter(c chan *types.Transaction) {
+	h.dexterTxChan = c
 }
 
 func (h *handler) handleTxs(p *peer, txs types.Transactions) {
 	// Mark the hashes as present at the remote node
-	// special := [][]byte{
-	// 	[]byte{0xf4, 0x91, 0xe7, 0xb6, 0x9e, 0x42, 0x44, 0xad, 0x40, 0x02, 0xbc, 0x14, 0xe8, 0x78, 0xa3, 0x42, 0x07, 0xe3, 0x8c, 0x29},
-	// }
 	for _, tx := range txs {
 		p.MarkTransaction(tx.Hash())
+		if h.txRaceChan != nil {
+			h.txRaceChan <- &RaceEntry{
+				Hash:   tx.Hash(),
+				PeerID: p.id,
+				T:      time.Now(),
+				Full:   true,
+			}
+		}
 		// to := tx.To()
 		// if to != nil {
 		// 	toBytes := to.Bytes()
@@ -903,6 +934,12 @@ func (h *handler) handleEventHashes(p *peer, announces hash.Events) {
 	// Mark the hashes as present at the remote node
 	for _, id := range announces {
 		p.MarkEvent(id)
+		if h.eventRaceChan != nil {
+			h.eventRaceChan <- &RaceEntry{
+				Hash:   (common.Hash)(id),
+				PeerID: p.id,
+			}
+		}
 	}
 	// filter too high IDs
 	notTooHigh := make(hash.Events, 0, len(announces))
@@ -930,6 +967,12 @@ func (h *handler) handleEvents(p *peer, events dag.Events, ordered bool) {
 	// Mark the hashes as present at the remote node
 	for _, e := range events {
 		p.MarkEvent(e.ID())
+		if h.eventRaceChan != nil {
+			h.eventRaceChan <- &RaceEntry{
+				Hash:   (common.Hash)(e.ID()),
+				PeerID: p.id,
+			}
+		}
 	}
 	// filter too high events
 	notTooHigh := make(dag.Events, 0, len(events))
@@ -1339,6 +1382,21 @@ func (h *handler) decideBroadcastAggressiveness(size int, passed time.Duration, 
 	return fullRecipients
 }
 
+// Dexter
+func (h *handler) SubscribeEvents(ch chan *inter.EventPayload) {
+	h.eventCh = ch
+}
+
+// Dexter
+func (h *handler) RaceEvents(ch chan *RaceEntry) {
+	h.eventRaceChan = ch
+}
+
+// Dexter
+func (h *handler) RaceTxs(ch chan *RaceEntry) {
+	h.txRaceChan = ch
+}
+
 // BroadcastEvent will either propagate a event to a subset of it's peers, or
 // will only announce it's availability (depending what's requested).
 func (h *handler) BroadcastEvent(event *inter.EventPayload, passed time.Duration) int {
@@ -1365,6 +1423,9 @@ func (h *handler) BroadcastEvent(event *inter.EventPayload, passed time.Duration
 		peer.AsyncSendEventIDs(hash.Events{event.ID()}, peer.queue)
 	}
 	log.Trace("Broadcast event", "hash", id, "fullRecipients", len(fullBroadcast), "hashRecipients", len(hashBroadcast))
+	if h.eventCh != nil {
+		h.eventCh <- event
+	}
 	return len(peers)
 }
 
@@ -1377,30 +1438,28 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 	totalSize := common.StorageSize(0)
 	containsLocalTx := false
 	for _, tx := range txs {
-		to := tx.To()
-		hash := tx.Hash()
-		if (to != nil && to[0] == 0xba && to[1] == 0x16 && to[2] == 0x4f) {
-			log.Info("Detected local tx", "hash", hash)
-			containsLocalTx = true
-		}
+		// to := tx.To()
+		// if to != nil && to[0] == 0xba && to[1] == 0x16 && to[2] == 0x4f {
+		// 	containsLocalTx = true
+		// }
 		peers := h.peers.PeersWithoutTx(tx.Hash())
 		for i, peer := range peers {
 			txset[peer] = append(txset[peer], tx)
-			if (!containsLocalTx && i > 10) {
-				break; // Non-local txs are low priority.
+			if !containsLocalTx && i > 10 {
+				break // Non-local txs are low priority.
 			}
 		}
 		totalSize += tx.Size()
-		if (containsLocalTx) {
-			log.Info("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
-		}
+		// if containsLocalTx {
+		// 	log.Info("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+		// }
 	}
-	if (len(txset) == 0) {
-		return;
+	if len(txset) == 0 {
+		return
 	}
 	fullRecipients := len(txset)
 	if containsLocalTx {
-		log.Info("Broadcasting", "peers", len(txset), "full recipients", fullRecipients, "transactions", len(txs))
+		log.Info("Broadcasting", "peers", len(txset), "full recipients", fullRecipients, "transactions", len(txs), "size", totalSize)
 	} else {
 		fullRecipients = h.decideBroadcastAggressiveness(int(totalSize), time.Second, len(txset))
 	}
@@ -1408,7 +1467,11 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 	for peer, txs := range txset {
 		SplitTransactions(txs, func(batch types.Transactions) {
 			if i < fullRecipients {
-				peer.AsyncSendTransactions(batch, peer.queue)
+				if containsLocalTx {
+					peer.AsyncSendTransactions(batch, peer.fastQueue)
+				} else {
+					peer.AsyncSendTransactions(batch, peer.queue)
+				}
 			} else {
 				txids := make([]common.Hash, batch.Len())
 				for i, tx := range batch {
@@ -1418,6 +1481,22 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 			}
 		})
 		i++
+	}
+}
+
+// Dexter
+func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
+	peers := h.peers.GetSortedPeers()
+	if len(peers) == 0 {
+		peers = h.peers.List()
+	}
+	totalSize := common.StorageSize(0)
+	for _, tx := range txs {
+		totalSize += tx.Size()
+	}
+	log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
+	for _, peer := range peers {
+		peer.AsyncSendTransactions(txs, peer.fastQueue)
 	}
 }
 
