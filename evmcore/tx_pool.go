@@ -956,12 +956,12 @@ func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) bool {
 	if to == nil {
 		return false
 	}
-	toBytes := to.Bytes()
-	if bytes.Compare(mrMillion[:], toBytes) == 0 {
-		from, _ := types.Sender(pool.signer, tx)
-		log.Info("Found Mr Million tx", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "gas", tx.GasPrice())
-		return false
-	}
+	// toBytes := to.Bytes()
+	// if bytes.Compare(mrMillion[:], toBytes) == 0 {
+	// 	from, _ := types.Sender(pool.signer, tx)
+	// 	log.Info("Found Mr Million tx", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "gas", tx.GasPrice())
+	// 	return false
+	// }
 	data := tx.Data()
 	if len(data) < 4 {
 		return false
@@ -972,12 +972,6 @@ func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) bool {
 		}
 		return true
 	}
-	// for _, cmp := range routers {
-	// 	if bytes.Compare(cmp[:], toBytes) != 0 {
-	// 		continue
-	// 	}
-	// 	return true
-	// }
 	return false
 }
 

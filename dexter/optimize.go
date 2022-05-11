@@ -12,15 +12,7 @@ type Dexter struct {
 	pairsInfo map[common.Address]*PairInfo
 }
 
-type PairInfo struct {
-	reserve0     *big.Int
-	reserve1     *big.Int
-	token0       common.Address
-	token1       common.Address
-	feeNumerator *big.Int
-}
-
-type Leg struct {
+type MultiLeg struct {
 	From      common.Address
 	To        common.Address
 	PairAddrs []common.Address
@@ -29,18 +21,18 @@ type Leg struct {
 
 func findRoot(pairInfo1, pairInfo2 *PairInfo, fromToken common.Address) *big.Int {
 	var r_a_i, r_a_o, r_b_i, r_b_o *big.Int
-	if bytes.Compare(pairInfo1.token0.Bytes(), fromToken.Bytes()) == 0 {
-		r_a_i, r_a_o = pairInfo1.reserve0, pairInfo1.reserve1
+	if bytes.Compare(pairInfo1.Token0.Bytes(), fromToken.Bytes()) == 0 {
+		r_a_i, r_a_o = pairInfo1.Reserves[0], pairInfo1.Reserves[1]
 	} else {
-		r_a_o, r_a_i = pairInfo1.reserve0, pairInfo1.reserve1
+		r_a_o, r_a_i = pairInfo1.Reserves[0], pairInfo1.Reserves[1]
 	}
-	if bytes.Compare(pairInfo2.token0.Bytes(), fromToken.Bytes()) == 0 {
-		r_b_i, r_b_o = pairInfo2.reserve0, pairInfo2.reserve1
+	if bytes.Compare(pairInfo2.Token0.Bytes(), fromToken.Bytes()) == 0 {
+		r_b_i, r_b_o = pairInfo2.Reserves[0], pairInfo2.Reserves[1]
 	} else {
-		r_b_o, r_b_i = pairInfo2.reserve0, pairInfo2.reserve1
+		r_b_o, r_b_i = pairInfo2.Reserves[0], pairInfo2.Reserves[1]
 	}
 	f_d := new(big.Int).Exp(big.NewInt(10), big.NewInt(6), nil)
-	f_a := pairInfo1.feeNumerator
+	f_a := pairInfo1.FeeNumerator
 	a := new(big.Int).Div(new(big.Int).Mul(r_b_o, f_a), f_d)
 	b := new(big.Int).Mul(r_b_o, new(big.Int).Add(new(big.Int).Div(new(big.Int).Mul(r_a_i, f_a), f_d), r_a_i))
 	c := new(big.Int).Sub(new(big.Int).Mul(r_b_o, new(big.Int).Exp(r_a_i, big.NewInt(2), nil)),
@@ -56,16 +48,16 @@ func findRoot(pairInfo1, pairInfo2 *PairInfo, fromToken common.Address) *big.Int
 func (d *Dexter) getPairInfo(pairsInfoOverride map[common.Address]*PairInfo, pairAddr common.Address) *PairInfo {
 	if pairsInfoOverride != nil {
 		if pairInfo, ok := pairsInfoOverride[pairAddr]; ok {
-			if pairInfo.reserve0.BitLen() == 0 || pairInfo.reserve1.BitLen() == 0 {
-				// log.Info("WARNING: getPairInfo found override with 0 reserve0 or reserve1", "Addr", pairAddr, "len", len(pairsInfoOverride))
+			if pairInfo.Reserves[0].BitLen() == 0 || pairInfo.Reserves[1].BitLen() == 0 {
+				// log.Info("WARNING: getPairInfo found override with 0 Reserves[0] or Reserves[1]", "Addr", pairAddr, "len", len(pairsInfoOverride))
 			}
 			return pairInfo
 		}
 	}
 	pairInfo := d.pairsInfo[pairAddr]
-	// fmt.Printf("R0: %s, R1: %s\n", pairInfo.reserve0, pairInfo.reserve1)
-	if pairInfo.reserve0.BitLen() == 0 || pairInfo.reserve1.BitLen() == 0 {
-		// log.Info("WARNING: getPairInfo found baseline with 0 reserve0 or reserve1", "Addr", pairAddr, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1)
+	// fmt.Printf("R0: %s, R1: %s\n", pairInfo.Reserves[0], pairInfo.Reserves[1])
+	if pairInfo.Reserves[0].BitLen() == 0 || pairInfo.Reserves[1].BitLen() == 0 {
+		// log.Info("WARNING: getPairInfo found baseline with 0 Reserves[0] or Reserves[1]", "Addr", pairAddr, "Reserves[0]", pairInfo.Reserves[0], "Reserves[1]", pairInfo.Reserves[1])
 	}
 	return pairInfo
 }
@@ -205,28 +197,28 @@ func getAmountOutMultiSecondPrime(
 }
 
 func (d *Dexter) getRouteAmountOut(
-	route []*Leg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
+	route []*MultiLeg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
 	var amountOut *big.Int
 	var reserves [4]*big.Int
 	for _, leg := range route {
 		pairInfo1 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[0])
-		if bytes.Compare(pairInfo1.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserves[0], reserves[1] = pairInfo1.reserve0, pairInfo1.reserve1
+		if bytes.Compare(pairInfo1.Token0.Bytes(), leg.From.Bytes()) == 0 {
+			reserves[0], reserves[1] = pairInfo1.Reserves[0], pairInfo1.Reserves[1]
 		} else {
-			reserves[0], reserves[1] = pairInfo1.reserve1, pairInfo1.reserve0
+			reserves[0], reserves[1] = pairInfo1.Reserves[1], pairInfo1.Reserves[0]
 		}
 		if len(leg.PairAddrs) > 1 {
 			pairInfo2 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[1])
-			if bytes.Compare(pairInfo2.token0.Bytes(), leg.From.Bytes()) == 0 {
-				reserves[2], reserves[3] = pairInfo2.reserve0, pairInfo2.reserve1
+			if bytes.Compare(pairInfo2.Token0.Bytes(), leg.From.Bytes()) == 0 {
+				reserves[2], reserves[3] = pairInfo2.Reserves[0], pairInfo2.Reserves[1]
 			} else {
-				reserves[2], reserves[3] = pairInfo2.reserve1, pairInfo2.reserve0
+				reserves[2], reserves[3] = pairInfo2.Reserves[1], pairInfo2.Reserves[0]
 			}
 			amountOut = getAmountOutMulti(
-				amountIn, leg.Root, pairInfo1.feeNumerator, pairInfo2.feeNumerator, reserves)
+				amountIn, leg.Root, pairInfo1.FeeNumerator, pairInfo2.FeeNumerator, reserves)
 			// fmt.Printf("Leg: %d, amountOut(Multi): %s\n", i, amountOut)
 		} else {
-			amountOut = getAmountOut(amountIn, reserves[0], reserves[1], pairInfo1.feeNumerator)
+			amountOut = getAmountOut(amountIn, reserves[0], reserves[1], pairInfo1.FeeNumerator)
 			// fmt.Printf("Leg: %d, amountOut(Single): %s\n", i, amountOut)
 		}
 		amountIn = amountOut
@@ -237,44 +229,44 @@ func (d *Dexter) getRouteAmountOut(
 }
 
 func (d *Dexter) getRouteAmountOutPrime(
-	route []*Leg, amountIn1, amountIn2 *big.Int, pairsInfoOverride map[common.Address]*PairInfo) (float64, float64) {
+	route []*MultiLeg, amountIn1, amountIn2 *big.Int, pairsInfoOverride map[common.Address]*PairInfo) (float64, float64) {
 	prime1 := 1.
 	prime2 := 1.
 	var reserves [4]*big.Int
 	for _, leg := range route {
 		pairInfo1 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[0])
-		if bytes.Compare(pairInfo1.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserves[0], reserves[1] = pairInfo1.reserve0, pairInfo1.reserve1
+		if bytes.Compare(pairInfo1.Token0.Bytes(), leg.From.Bytes()) == 0 {
+			reserves[0], reserves[1] = pairInfo1.Reserves[0], pairInfo1.Reserves[1]
 		} else {
-			reserves[0], reserves[1] = pairInfo1.reserve1, pairInfo1.reserve0
+			reserves[0], reserves[1] = pairInfo1.Reserves[1], pairInfo1.Reserves[0]
 		}
 		if len(leg.PairAddrs) > 1 {
 			pairInfo2 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[1])
-			if bytes.Compare(pairInfo2.token0.Bytes(), leg.From.Bytes()) == 0 {
-				reserves[2], reserves[3] = pairInfo2.reserve0, pairInfo2.reserve1
+			if bytes.Compare(pairInfo2.Token0.Bytes(), leg.From.Bytes()) == 0 {
+				reserves[2], reserves[3] = pairInfo2.Reserves[0], pairInfo2.Reserves[1]
 			} else {
-				reserves[2], reserves[3] = pairInfo2.reserve1, pairInfo2.reserve0
+				reserves[2], reserves[3] = pairInfo2.Reserves[1], pairInfo2.Reserves[0]
 			}
 			prime1 *= getAmountOutMultiPrime(
-				amountIn1, leg.Root, pairInfo1.feeNumerator, pairInfo2.feeNumerator, reserves)
+				amountIn1, leg.Root, pairInfo1.FeeNumerator, pairInfo2.FeeNumerator, reserves)
 			amountIn1 = getAmountOutMulti(
-				amountIn1, leg.Root, pairInfo1.feeNumerator, pairInfo2.feeNumerator, reserves)
+				amountIn1, leg.Root, pairInfo1.FeeNumerator, pairInfo2.FeeNumerator, reserves)
 			prime2 *= getAmountOutMultiPrime(
-				amountIn2, leg.Root, pairInfo1.feeNumerator, pairInfo2.feeNumerator, reserves)
+				amountIn2, leg.Root, pairInfo1.FeeNumerator, pairInfo2.FeeNumerator, reserves)
 			amountIn2 = getAmountOutMulti(
-				amountIn2, leg.Root, pairInfo1.feeNumerator, pairInfo2.feeNumerator, reserves)
+				amountIn2, leg.Root, pairInfo1.FeeNumerator, pairInfo2.FeeNumerator, reserves)
 		} else {
-			prime1 *= getAmountOutPrime(amountIn1, reserves[0], reserves[1], pairInfo1.feeNumerator)
-			amountIn1 = getAmountOut(amountIn1, reserves[0], reserves[1], pairInfo1.feeNumerator)
-			prime2 *= getAmountOutPrime(amountIn2, reserves[0], reserves[1], pairInfo1.feeNumerator)
-			amountIn2 = getAmountOut(amountIn2, reserves[0], reserves[1], pairInfo1.feeNumerator)
+			prime1 *= getAmountOutPrime(amountIn1, reserves[0], reserves[1], pairInfo1.FeeNumerator)
+			amountIn1 = getAmountOut(amountIn1, reserves[0], reserves[1], pairInfo1.FeeNumerator)
+			prime2 *= getAmountOutPrime(amountIn2, reserves[0], reserves[1], pairInfo1.FeeNumerator)
+			amountIn2 = getAmountOut(amountIn2, reserves[0], reserves[1], pairInfo1.FeeNumerator)
 		}
 	}
 	return prime1, prime2
 }
 
 func (d *Dexter) getRouteAmountOutSecondPrime(
-	route []*Leg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo) float64 {
+	route []*MultiLeg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo) float64 {
 	// Get reserves and fees for each pair of each leg of route, store as 2-D arrays
 	reserves := make([][4]*big.Int, len(route))
 	fees := make([][2]*big.Int, len(route))
@@ -282,26 +274,26 @@ func (d *Dexter) getRouteAmountOutSecondPrime(
 		pairInfo1 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[0])
 		var reserveFrom *big.Int
 		var reserveTo *big.Int
-		if bytes.Compare(pairInfo1.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserveFrom, reserveTo = pairInfo1.reserve0, pairInfo1.reserve1
+		if bytes.Compare(pairInfo1.Token0.Bytes(), leg.From.Bytes()) == 0 {
+			reserveFrom, reserveTo = pairInfo1.Reserves[0], pairInfo1.Reserves[1]
 		} else {
-			reserveFrom, reserveTo = pairInfo1.reserve1, pairInfo1.reserve0
+			reserveFrom, reserveTo = pairInfo1.Reserves[1], pairInfo1.Reserves[0]
 		}
 		reserves[i][0] = reserveFrom
 		reserves[i][1] = reserveTo
-		fees[i][0] = pairInfo1.feeNumerator
+		fees[i][0] = pairInfo1.FeeNumerator
 		if len(leg.PairAddrs) > 1 {
 			pairInfo2 := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[0])
 			var reserveFrom *big.Int
 			var reserveTo *big.Int
-			if bytes.Compare(pairInfo2.token0.Bytes(), leg.From.Bytes()) == 0 {
-				reserveFrom, reserveTo = pairInfo2.reserve0, pairInfo2.reserve1
+			if bytes.Compare(pairInfo2.Token0.Bytes(), leg.From.Bytes()) == 0 {
+				reserveFrom, reserveTo = pairInfo2.Reserves[0], pairInfo2.Reserves[1]
 			} else {
-				reserveFrom, reserveTo = pairInfo2.reserve1, pairInfo2.reserve0
+				reserveFrom, reserveTo = pairInfo2.Reserves[1], pairInfo2.Reserves[0]
 			}
 			reserves[i][2] = reserveFrom
 			reserves[i][3] = reserveTo
-			fees[i][1] = pairInfo2.feeNumerator
+			fees[i][1] = pairInfo2.FeeNumerator
 		}
 	}
 	// for _, i := range reserves {
@@ -371,7 +363,7 @@ func (d *Dexter) getRouteAmountOutSecondPrime(
 
 // Secant method to calculate optimal amountIn
 func (d *Dexter) calcOptimalAmountInSecant(
-	amountIn *big.Int, route []*Leg, pairsInfoOverride map[common.Address]*PairInfo) (bool, *big.Int) {
+	amountIn *big.Int, route []*MultiLeg, pairsInfoOverride map[common.Address]*PairInfo) (bool, *big.Int) {
 	tenToSix := big.NewInt(1000000)
 	ten := big.NewInt(10)
 	two := big.NewInt(2)
@@ -410,7 +402,7 @@ func (d *Dexter) calcOptimalAmountInSecant(
 
 // // Newton's method to calculate optimal amountIn
 // func (d *Dexter) calcOptimalAmountInNewton(
-// 	amountIn *big.Int, route []*Leg, pairsInfoOverride map[common.Address]*PairInfo) (bool, *big.Int) {
+// 	amountIn *big.Int, route []*MultiLeg, pairsInfoOverride map[common.Address]*PairInfo) (bool, *big.Int) {
 // 	step := 0.
 // 	tolerance := math.Pow(10., 12) // 6 (18-12) token decimals of accuracy
 // 	for i := 0; i <= 100; i++ {
@@ -432,32 +424,32 @@ func (d *Dexter) calcOptimalAmountInSecant(
 // 	return false, amountIn
 // }
 
-func (d *Dexter) getRouteOptimalAmountIn(route []*Leg, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
+func (d *Dexter) getRouteOptimalAmountIn(route []*MultiLeg, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
 	startPairInfo := d.getPairInfo(pairsInfoOverride, route[0].PairAddrs[0])
 	leftAmount, rightAmount := new(big.Int), new(big.Int)
-	if bytes.Compare(startPairInfo.token0.Bytes(), route[0].From.Bytes()) == 0 {
-		leftAmount.Set(startPairInfo.reserve0)
-		rightAmount.Set(startPairInfo.reserve1)
+	if bytes.Compare(startPairInfo.Token0.Bytes(), route[0].From.Bytes()) == 0 {
+		leftAmount.Set(startPairInfo.Reserves[0])
+		rightAmount.Set(startPairInfo.Reserves[1])
 	} else {
-		leftAmount.Set(startPairInfo.reserve1)
-		rightAmount.Set(startPairInfo.reserve0)
+		leftAmount.Set(startPairInfo.Reserves[1])
+		rightAmount.Set(startPairInfo.Reserves[0])
 	}
-	// log.Info("Starting getRouteOptimalAmountIn", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserve0", startPairInfo.reserve0, "reserve1", startPairInfo.reserve1, "startPairInfo", *startPairInfo)
-	r1 := startPairInfo.feeNumerator
+	// log.Info("Starting getRouteOptimalAmountIn", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserves[0]", startPairInfo.reserves[0], "reserves[1]", startPairInfo.reserves[1], "startPairInfo", *startPairInfo)
+	r1 := startPairInfo.FeeNumerator
 	tenToSix := big.NewInt(int64(1e6))
 	for _, leg := range route[1:] {
 		pairInfo := d.getPairInfo(pairsInfoOverride, leg.PairAddrs[0])
 		var reserveFrom, reserveTo *big.Int
-		if bytes.Compare(pairInfo.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserveFrom, reserveTo = pairInfo.reserve0, pairInfo.reserve1
+		if bytes.Compare(pairInfo.Token0.Bytes(), leg.From.Bytes()) == 0 {
+			reserveFrom, reserveTo = pairInfo.Reserves[0], pairInfo.Reserves[1]
 		} else {
-			reserveTo, reserveFrom = pairInfo.reserve0, pairInfo.reserve1
+			reserveTo, reserveFrom = pairInfo.Reserves[0], pairInfo.Reserves[1]
 		}
-		legFee := pairInfo.feeNumerator
+		legFee := pairInfo.FeeNumerator
 		den := new(big.Int).Mul(rightAmount, legFee)
 		den = den.Div(den, tenToSix)
 		den = den.Add(den, reserveFrom)
-		// log.Info("getRouteOptimalAmountIn step", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserveFrom", reserveFrom, "reserveTo", reserveTo, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1, "den", den, "from", leg.From.Bytes()[:2], "token0", pairInfo.token0.Bytes()[:2])
+		// log.Info("getRouteOptimalAmountIn step", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserveFrom", reserveFrom, "reserveTo", reserveTo, "reserves[0]", pairInfo.Reserves[0], "reserves[1]", pairInfo.Reserves[1], "den", den, "from", leg.From.Bytes()[:2], "Token0", pairInfo.Token0.Bytes()[:2])
 		leftAmount = leftAmount.Mul(leftAmount, reserveFrom)
 		leftAmount = leftAmount.Div(leftAmount, den)
 		rightAmount = rightAmount.Mul(rightAmount, reserveTo)

@@ -2,19 +2,19 @@ package gossip
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"math"
 	"math/big"
-	"math/rand"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish3_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/uniswap_pair_lite"
+	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/evmcore"
 	"github.com/Fantom-foundation/go-opera/inter"
 	"github.com/Fantom-foundation/go-opera/inter/iblockproc"
@@ -35,55 +35,83 @@ import (
 )
 
 const (
-	GAS_INITIAL = 30000
-	// GAS_INITIAL  = 3000000
-	GAS_TRANSFER = 27000
-	GAS_SWAP     = 80000
-	// GAS_INITIAL  = 0
-	// GAS_TRANSFER = 0
-	// GAS_SWAP     = 0
-	GAS_FAIL = 140000
+	numValidators = 8
 )
 
 var (
+	fishAddr           = common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8")
 	nullAddr           = common.HexToAddress("0x0000000000000000000000000000000000000000")
 	syncEventTopic     = []byte{0x1c, 0x41, 0x1e, 0x9a, 0x96, 0xe0, 0x71, 0x24, 0x1c, 0x2f, 0x21, 0xf7, 0x72, 0x6b, 0x17, 0xae, 0x89, 0xe3, 0xca, 0xb4, 0xc7, 0x8b, 0xe5, 0x0e, 0x06, 0x2b, 0x03, 0xa9, 0xff, 0xfb, 0xba, 0xd1}
 	pairGetReservesAbi = uniswap_pair_lite.GetReserves()
 	pairToken0Abi      = uniswap_pair_lite.Token0()
 	pairToken1Abi      = uniswap_pair_lite.Token1()
-	startTokensIn      = new(big.Int).Exp(big.NewInt(10), big.NewInt(19), nil)
-	maxAmountIn        = new(big.Int).Mul(big.NewInt(1825), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-	exampleKey         = pairKeyFromStrs("0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83", "0xd67de0e0a0fd7b15dc8348bb9be742f3c5850454", "0xF3369Bd152780B01A4F9Add38150BEEFf924DaA7")
-	fishAddr           = common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8")
+	root               = "/home/ubuntu/dexter/carb/"
+	MaxGasPrice        = big.NewInt(25000000000000)
+	accuracyAlpha      = 0.8
+	bravadoAlpha       = 0.75
+	gasAlpha           = 0.5
+	contracts          = map[common.Address]string{
+		common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8"): "Fish3",
+		common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52"): "Mr Million",
+		common.HexToAddress("0x6C080c87e84e71C4c8364128dBE66f5e30a0e370"): "Starving Artist",
+		common.HexToAddress("0x244FAcabcf7a1026849B53295b1F7279a1bD597b"): "Topher Ford",
+		common.HexToAddress("0xd20d27d5cB769522410e0A2f32000C947af7Ffe5"): "Dee Twenny",
+		common.HexToAddress("0x0306c72b69E62be7c7168828cB98Dd41A0B01f8B"): "Flash Boy",
+		common.HexToAddress("0x4365C7DD814e1f4b3104B6b5C1079B32b1eA6E8D"): "Sam McGee",
+		common.HexToAddress("0xD8E1D3608D927d370afFE5EaaF6B050BDc11df6E"): "Daisy with a reputation",
+		common.HexToAddress("0x3BCC05Bc23a6D3223C09F1724bE631c3A2Ff3a77"): "Flipper",
+		common.HexToAddress("0xF4C587a0972Ac2039BFF67Bc44574bB403eF5235"): "ProtoFi",
+		common.HexToAddress("0x845E76A8691423fbc4ECb8Dd77556Cb61c09eE25"): "JetSwap",
+		common.HexToAddress("0x6D0176C5ea1e44b08D3dd001b0784cE42F47a3A7"): "TombSwap",
+		common.HexToAddress("0x4D2cf285a519261F30b4d9c2c344Baf260d65Fa2"): "Elk",
+		common.HexToAddress("0x8aC868293D97761A1fED6d4A01E9FF17C5594Aa3"): "Morpheus",
+		common.HexToAddress("0xc8Fe105cEB91e485fb0AC338F2994Ea655C78691"): "Excalibur",
+		common.HexToAddress("0x5023882f4D1EC10544FCB2066abE9C1645E95AA0"): "Wigo",
+		common.HexToAddress("0x045312C737a6b7a115906Be0aD0ef53A6AA38106"): "Dark Knight",
+		common.HexToAddress("0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52"): "SpiritSwap",
+		common.HexToAddress("0x7b17021fcb7bc888641dc3bedfed3734fcaf2c87"): "WakaSwap",
+		common.HexToAddress("0x53c153a0df7E050BbEFbb70eE9632061f12795fB"): "HyperJump",
+		common.HexToAddress("0xf491e7b69e4244ad4002bc14e878a34207e38c29"): "SpookySwap",
+		common.HexToAddress("0xb9799De71100e20aC1cdbCc63C69ddA2D0D81710"): "fBomb",
+		common.HexToAddress("0xfD000ddCEa75a2E23059881c3589F6425bFf1AbB"): "PaintSwap",
+		common.HexToAddress("0x5F54B226f08d1fB9b612ADfa07f2CfF726c6cA46"): "DefySwap",
+		common.HexToAddress("0xcdA8f0fB4132D977AD427d18555E0cb1b1dfA363"): "Degen",
+	}
 )
 
-type PairKey [60]byte
-
 type Dexter struct {
-	svc                 *Service
-	inTxChan            chan *types.Transaction
-	inLogsChan          chan []*types.Log
-	inLogsSub           notify.Subscription
-	inBlockChan         chan evmcore.ChainHeadNotify
-	inBlockSub          notify.Subscription
-	inEpochChan         chan idx.Epoch
-	inEpochSub          notify.Subscription
-	inEventChan         chan *inter.EventPayload
-	inEventSub          notify.Subscription
-	pairsInfo           map[common.Address]*PairInfo
-	lag                 time.Duration
-	routeCache          RouteCache
-	gunRefreshes        chan map[idx.ValidatorID][]accounts.Wallet
-	signer              types.Signer
-	guns                map[idx.ValidatorID][]accounts.Wallet
-	watchedTxs          chan *TxSub
-	ignoreTxs           map[common.Hash]struct{}
-	clearIgnoreTxChan   chan common.Hash
-	eventRaceChan       chan *RaceEntry
-	txRaceChan          chan *RaceEntry
-	pairsInfoUpdateChan chan *PairsInfoUpdate
-	txLagRequestChan    chan common.Hash
-	mu                  sync.RWMutex
+	svc               *Service
+	inTxChan          chan *types.Transaction
+	inLogsChan        chan []*types.Log
+	inLogsSub         notify.Subscription
+	inBlockChan       chan evmcore.ChainHeadNotify
+	inBlockSub        notify.Subscription
+	inEpochChan       chan idx.Epoch
+	inEpochSub        notify.Subscription
+	inEventChan       chan *inter.EventPayload
+	inEventSub        notify.Subscription
+	lag               time.Duration
+	gunRefreshes      chan GunList
+	signer            types.Signer
+	guns              map[idx.ValidatorID][]accounts.Wallet // Deprecated
+	gunList           GunList
+	watchedTxs        chan *TxSub
+	ignoreTxs         map[common.Hash]struct{}
+	interestedPairs   map[common.Address]struct{}
+	clearIgnoreTxChan chan common.Hash
+	eventRaceChan     chan *RaceEntry
+	txRaceChan        chan *RaceEntry
+	railgunChan       chan *dexter.RailgunPacket
+	txLagRequestChan  chan common.Hash
+	strategies        []dexter.Strategy
+	strategyBravado   []float64
+	firedTxChan       chan *FiredTx
+	pairsInfo         map[common.Address]*dexter.PairInfo
+	accuracy          float64
+	gasFloors         map[idx.ValidatorID]int64
+	globalGasFloor    int64
+	numPending        int
+	mu                sync.RWMutex
 }
 
 type RaceEntry struct {
@@ -97,26 +125,15 @@ type TxSub struct {
 	Hash                common.Hash
 	Label               string
 	PredictedValidators []idx.ValidatorID
+	TargetValidators    []idx.ValidatorID
+	Print               bool
+	StartTime           time.Time
 }
 
-type PairInfo struct {
-	reserve0     *big.Int
-	reserve1     *big.Int
-	token0       common.Address
-	token1       common.Address
-	feeNumerator *big.Int
-}
-
-type RouteCache struct {
-	Routes          [][]*Leg
-	PairToRouteIdxs map[PairKey][]uint
-	Scores          []uint64
-}
-
-type Leg struct {
-	From     common.Address
-	To       common.Address
-	PairAddr common.Address
+type FiredTx struct {
+	Hash       common.Hash
+	StrategyID int
+	Time       time.Time
 }
 
 type PairInfoJson struct {
@@ -127,94 +144,94 @@ type PairInfoJson struct {
 	FeeNumerator int64  `json:feeNumerator`
 }
 
-type LegJson struct {
-	From     string `json:from`
-	To       string `json:to`
-	PairAddr string `json:pairAddr`
-}
-
-type RouteCacheJson struct {
-	Routes          [][]LegJson       `json:routes`
-	PairToRouteIdxs map[string][]uint `json:pairToRouteIdxs`
-}
-
-type Plan struct {
-	AmountIn *big.Int
-	GasPrice *big.Int
-	GasCost  *big.Int
-	Path     []fish3_lite.SwapCommand
-}
-
-// TODO  compute PairToRouteIdxs updates in background and send something like this to main goroutine
-
-type PairsInfoUpdate struct {
-	PairsInfoUpdates map[common.Address]*PairInfo
-	PairToRouteIdxs  map[PairKey][]uint
-	Scores           []uint64
-}
-
 func NewDexter(svc *Service) *Dexter {
 	d := &Dexter{
-		svc:                 svc,
-		inTxChan:            make(chan *types.Transaction, 256),
-		inLogsChan:          make(chan []*types.Log, 256),
-		inBlockChan:         make(chan evmcore.ChainHeadNotify, 256),
-		inEpochChan:         make(chan idx.Epoch, 256),
-		inEventChan:         make(chan *inter.EventPayload, 256),
-		pairsInfo:           make(map[common.Address]*PairInfo),
-		lag:                 time.Minute * 60,
-		signer:              gsignercache.Wrap(types.LatestSignerForChainID(svc.store.GetRules().EvmChainConfig().ChainID)),
-		gunRefreshes:        make(chan map[idx.ValidatorID][]accounts.Wallet),
-		watchedTxs:          make(chan *TxSub),
-		ignoreTxs:           make(map[common.Hash]struct{}),
-		clearIgnoreTxChan:   make(chan common.Hash, 16),
-		eventRaceChan:       make(chan *RaceEntry, 4096),
-		txRaceChan:          make(chan *RaceEntry, 4096),
-		pairsInfoUpdateChan: make(chan *PairsInfoUpdate),
-		txLagRequestChan:    make(chan common.Hash, 16),
+		svc:               svc,
+		inTxChan:          make(chan *types.Transaction, 256),
+		inLogsChan:        make(chan []*types.Log, 256),
+		inBlockChan:       make(chan evmcore.ChainHeadNotify, 256),
+		inEpochChan:       make(chan idx.Epoch, 256),
+		inEventChan:       make(chan *inter.EventPayload, 256),
+		interestedPairs:   make(map[common.Address]struct{}),
+		lag:               time.Minute * 60,
+		signer:            gsignercache.Wrap(types.LatestSignerForChainID(svc.store.GetRules().EvmChainConfig().ChainID)),
+		gunRefreshes:      make(chan GunList),
+		watchedTxs:        make(chan *TxSub),
+		firedTxChan:       make(chan *FiredTx),
+		ignoreTxs:         make(map[common.Hash]struct{}),
+		clearIgnoreTxChan: make(chan common.Hash, 16),
+		eventRaceChan:     make(chan *RaceEntry, 4096),
+		txRaceChan:        make(chan *RaceEntry, 4096),
+		railgunChan:       make(chan *dexter.RailgunPacket, 8),
+		txLagRequestChan:  make(chan common.Hash, 16),
+		pairsInfo:         make(map[common.Address]*dexter.PairInfo),
+		gasFloors:         make(map[idx.ValidatorID]int64),
 	}
+	d.strategies = []dexter.Strategy{
+		dexter.NewLinearStrategy("Linear", 0, d.railgunChan, dexter.LinearStrategyConfig{
+			RoutesFileName:          root + "route_cache_routes_10ftm.json",
+			PairToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_10ftm.json",
+		}),
+		// dexter.NewLinearStrategy("Linear 2", 0, d.railgunChan, dexter.LinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_cache_routes_len2.json",
+		// 	PairToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len2.json",
+		// }),
+		// dexter.NewLinearStrategy("Linear 3", 1, d.railgunChan, dexter.LinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_cache_routes_len3.json",
+		// 	PairToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len3.json",
+		// }),
+		// dexter.NewLinearStrategy("Linear 4", 2, d.railgunChan, dexter.LinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_cache_routes_len4.json",
+		// 	PairToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len4.json",
+		// }),
+	}
+	d.strategyBravado = make([]float64, len(d.strategies))
+	for i := 0; i < len(d.strategyBravado); i++ {
+		d.strategyBravado[i] = 1
+	}
+	// d.strategies[1].AddSubStrategy(d.strategies[1])
+	// d.strategies[1].AddSubStrategy(d.strategies[2])
 	d.inLogsSub = svc.feed.SubscribeNewLogs(d.inLogsChan)
 	d.inBlockSub = svc.feed.SubscribeNewBlock(d.inBlockChan)
 	d.inEpochSub = svc.feed.SubscribeNewEpoch(d.inEpochChan)
 	svc.handler.SubscribeEvents(d.inEventChan)
 	d.loadJson()
-	for pairAddr, pairInfo := range d.pairsInfo {
-		reserve0, reserve1 := d.getReserves(&pairAddr)
-		token0, token1 := d.getPairTokens(&pairAddr)
-		d.pairsInfo[pairAddr] = &PairInfo{
-			reserve0:     reserve0,
-			reserve1:     reserve1,
-			token0:       token0,
-			token1:       token1,
-			feeNumerator: pairInfo.feeNumerator,
+
+	for _, s := range d.strategies {
+		for pairAddr, _ := range s.GetInterestedPairs() {
+			d.interestedPairs[pairAddr] = struct{}{}
 		}
 	}
-	d.refreshScores()
-	d.routeCache.PairToRouteIdxs = d.sortPairToRouteIdxMap(d.routeCache.Scores)
+
+	for pairAddr, _ := range d.interestedPairs {
+		pairInfo, ok := d.pairsInfo[pairAddr]
+		if !ok {
+			log.Warn("Could not find PairInfo for interested pair", "addr", pairAddr)
+			continue
+		}
+		reserve0, reserve1 := d.getReserves(&pairAddr)
+		token0, token1 := d.getPairTokens(&pairAddr)
+		d.pairsInfo[pairAddr] = &dexter.PairInfo{
+			Reserves:     []*big.Int{reserve0, reserve1},
+			Token0:       token0,
+			Token1:       token1,
+			FeeNumerator: pairInfo.FeeNumerator,
+		}
+	}
+
+	for _, s := range d.strategies {
+		s.SetPairsInfo(d.pairsInfo)
+		s.Start()
+	}
+
 	go d.processIncomingLogs()
 	go d.processIncomingTxs()
 	go d.watchEvents()
 	go d.eventRace()
-	// svc.handler.AttachDexter(d.inTxChan)
+	go d.runRailgun()
 	svc.handler.RaceEvents(d.eventRaceChan)
 	svc.handler.RaceTxs(d.txRaceChan)
 	return d
-}
-
-func (d *Dexter) optimizePeers() {
-	for {
-		time.Sleep(10 * time.Second)
-		// localNode := d.svc.p2pServer.LocalNode()
-		// nodes := d.svc.p2pServer.DiscV5.AllNodes()
-		// for i, node := range nodes {
-		// 	log.Info("Node", "i", i, "IP", node.IP(), "node", node.ID(), "local id", localNode.ID(), "distance", enode.LogDist(localNode.ID(), node.ID()))
-		// }
-		peers := d.svc.p2pServer.Peers()
-		log.Info("Peers connected", "len", len(peers))
-		// for i, peer := range peers {
-		// 	log.Info("Peer", "i", i, "ID", peer.Node().ID(), "IP", peer.Node().IP(), "distance", enode.LogDist(localNode.ID(), peer.Node().ID()))
-		// }
-	}
 }
 
 type Pair struct {
@@ -340,7 +357,7 @@ func (d *Dexter) eventRace() {
 			}
 			sortedPeers = append(sortedPeers, losers...)
 			log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
-			d.svc.handler.peers.Cull(losers)
+			// d.svc.handler.peers.Cull(losers)
 			d.svc.handler.peers.SetSortedPeers(sortedPeers)
 			d.svc.handler.peers.SetSortedTxPeers(sortedTxPeers)
 
@@ -352,60 +369,6 @@ func (d *Dexter) eventRace() {
 }
 
 func (d *Dexter) loadJson() {
-	root := "/home/ubuntu/dexter/carb/"
-
-	log.Info("Loading routes")
-	routeCacheRoutesFileName := root + "route_cache_routes_10ftm.json"
-	routeCacheRoutesFile, err := os.Open(routeCacheRoutesFileName)
-	if err != nil {
-		log.Info("Error opening routeCacheRoutes", "routeCacheRoutesFileName", routeCacheRoutesFileName, "err", err)
-		return
-	}
-	defer routeCacheRoutesFile.Close()
-	routeCacheRoutesBytes, _ := ioutil.ReadAll(routeCacheRoutesFile)
-	var routeCacheJson RouteCacheJson
-	json.Unmarshal(routeCacheRoutesBytes, &(routeCacheJson.Routes))
-	log.Info("Loaded routes")
-
-	routeCachePairToRouteIdxsFileName := root + "route_cache_pairToRouteIdxs_10ftm.json"
-	routeCachePairToRouteIdxsFile, err := os.Open(routeCachePairToRouteIdxsFileName)
-	if err != nil {
-		log.Info("Error opening routeCachePairToRouteIdxs", "routeCachePairToRouteIdxsFileName", routeCachePairToRouteIdxsFileName, "err", err)
-		return
-	}
-	defer routeCachePairToRouteIdxsFile.Close()
-	routeCachePairToRouteIdxsBytes, _ := ioutil.ReadAll(routeCachePairToRouteIdxsFile)
-	json.Unmarshal(routeCachePairToRouteIdxsBytes, &(routeCacheJson.PairToRouteIdxs))
-	log.Info("Loaded pairToRouteIdxs")
-
-	routeCache := RouteCache{
-		Routes:          make([][]*Leg, len(routeCacheJson.Routes)),
-		PairToRouteIdxs: make(map[PairKey][]uint),
-		Scores:          make([]uint64, len(routeCacheJson.Routes)),
-	}
-	pairAddrs := make(map[common.Address]struct{})
-	for i, routeJson := range routeCacheJson.Routes {
-		route := make([]*Leg, len(routeJson))
-		for x, leg := range routeJson {
-			pairAddr := common.HexToAddress(leg.PairAddr)
-			if _, ok := pairAddrs[pairAddr]; !ok {
-				pairAddrs[pairAddr] = struct{}{}
-			}
-			route[x] = &Leg{
-				From:     common.HexToAddress(leg.From),
-				To:       common.HexToAddress(leg.To),
-				PairAddr: pairAddr,
-			}
-		}
-		routeCache.Routes[i] = route
-	}
-	for strKey, routeIdxs := range routeCacheJson.PairToRouteIdxs {
-		parts := strings.Split(strKey, "_")
-		key := pairKeyFromStrs(parts[0], parts[1], parts[2])
-		routeCache.PairToRouteIdxs[key] = routeIdxs
-	}
-	log.Info("Processed route cache")
-	d.routeCache = routeCache
 	pairsFileName := root + "pairs.json"
 	pairsFile, err := os.Open(pairsFileName)
 	if err != nil {
@@ -418,23 +381,10 @@ func (d *Dexter) loadJson() {
 	json.Unmarshal(pairsBytes, &jsonPairs)
 	for _, jsonPair := range jsonPairs {
 		pairAddr := common.HexToAddress(jsonPair.Addr)
-		if _, ok := pairAddrs[pairAddr]; ok {
-			d.pairsInfo[pairAddr] = &PairInfo{
-				feeNumerator: big.NewInt(jsonPair.FeeNumerator),
-			}
+		d.pairsInfo[pairAddr] = &dexter.PairInfo{
+			FeeNumerator: big.NewInt(jsonPair.FeeNumerator),
 		}
 	}
-}
-
-func (d *Dexter) printPairsInfo() {
-	for pairAddr, pairInfo := range d.pairsInfo {
-		log.Info("Pair", "pairAddr", pairAddr, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1, "info", pairInfo)
-	}
-	log.Info("Total pairs", "len", len(d.pairsInfo))
-	// exampleRoutes := d.routeCache.PairToRouteIdxs[exampleKey]
-	// for _, routeIdx := range exampleRoutes {
-	// 	log.Info("Route", "routeIdx", routeIdx, "score", d.routeCache.Scores[routeIdx], "path", d.routeCache.Routes[routeIdx])
-	// }
 }
 
 func (d *Dexter) printAccounts() {
@@ -457,76 +407,109 @@ func (d *Dexter) predictValidators(address common.Address, nonce uint64, validat
 	return ret
 }
 
+type Gun struct {
+	ValidatorIDs []idx.ValidatorID
+	Wallet       accounts.Wallet
+}
+type GunList []Gun
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+func CmpValidatorIDs(v1, v2 []idx.ValidatorID) int {
+	for i := 0; i < len(v1); i++ {
+		if v1[i] < v2[i] {
+			return -(i + 1)
+		}
+		if v1[i] > v2[i] {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func (g GunList) Len() int      { return len(g) }
+func (g GunList) Swap(i, j int) { g[i], g[j] = g[j], g[i] }
+func (g GunList) Less(i, j int) bool {
+	return CmpValidatorIDs(g[i].ValidatorIDs, g[j].ValidatorIDs) < 0
+}
+func (g GunList) Search(needle []idx.ValidatorID) int {
+	if len(g) < 1 {
+		return -1
+	}
+	low := 0
+	high := len(g) - 1
+	for low < high-1 {
+		median := (low + high) / 2
+		score := CmpValidatorIDs(g[median].ValidatorIDs, needle)
+		if score < 0 {
+			low = median
+		} else {
+			high = median
+		}
+	}
+	if abs(CmpValidatorIDs(g[low].ValidatorIDs, needle)) > abs(CmpValidatorIDs(g[high].ValidatorIDs, needle)) {
+		return low
+	}
+	return high
+}
+
 func (d *Dexter) refreshGuns() {
-	guns := make(map[idx.ValidatorID][]accounts.Wallet)
 	validators, epoch := d.svc.store.GetEpochValidators()
 	wallets := d.svc.accountManager.Wallets()
-	offset := rand.Intn(len(wallets))
+	guns := make(GunList, 0, len(wallets))
 	for i := 0; i < len(wallets); i++ {
-		wallet := wallets[(i+offset)%len(wallets)]
+		wallet := wallets[i]
 		wStatus, _ := wallet.Status()
 		if wStatus == "Locked" {
 			continue
 		}
 		account := wallet.Accounts()[0]
 		nonce := d.svc.txpool.Nonce(account.Address)
-		validatorIDs := d.predictValidators(account.Address, nonce, validators, epoch, 1)
-		validatorID := validatorIDs[0]
-		// log.Info("Wallet", "idx", w, "status", wStatus, "account", account.Address, "nonce", nonce, "validator", validatorID)
-		if gunQ, ok := guns[validatorID]; ok {
-			guns[validatorID] = append(gunQ, wallet)
-		} else {
-			guns[validatorID] = []accounts.Wallet{wallet}
-		}
+		validatorIDs := d.predictValidators(account.Address, nonce, validators, epoch, numValidators)
+		guns = append(guns, Gun{
+			ValidatorIDs: validatorIDs,
+			Wallet:       wallet,
+		})
 	}
+	sort.Sort(guns)
 	d.gunRefreshes <- guns
 }
 
 func (d *Dexter) processIncomingLogs() {
 	log.Info("Started dexter")
-	scores := make([]uint64, len(d.routeCache.Scores))
-	copy(scores, d.routeCache.Scores)
 	methods := make(map[[4]byte]int)
 	methodUsers := make(map[[4]byte]*common.Address)
 	numUpdates := 0
 	for {
+		var updates []*dexter.PairUpdate
 		select {
 		case logs := <-d.inLogsChan:
-			updated := false
-			pairsInfoUpdates := make(map[common.Address]*PairInfo)
 			for _, l := range logs {
 				pairAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
 				if pairAddr == nil {
 					continue
 				}
-				d.mu.RLock()
-				pairInfo, ok := d.pairsInfo[*pairAddr]
-				d.mu.RUnlock()
+				_, ok := d.interestedPairs[*pairAddr]
 				if !ok {
 					continue
 				}
-				// log.Info("Updated pairsInfo", "pairAddr", pairAddr, "reserve0", reserve0, "reserve1", reserve1)
-				pairsInfoUpdates[*pairAddr] = &PairInfo{
-					reserve0:     reserve0,
-					reserve1:     reserve1,
-					token0:       pairInfo.token0,
-					token1:       pairInfo.token1,
-					feeNumerator: pairInfo.feeNumerator,
-				}
-				key0 := pairKeyFromAddrs(pairInfo.token0, pairInfo.token1, *pairAddr)
-				key1 := pairKeyFromAddrs(pairInfo.token1, pairInfo.token0, *pairAddr)
-				d.refreshScoresForPair(key0, pairsInfoUpdates, scores) // Updates scores
-				d.refreshScoresForPair(key1, pairsInfoUpdates, scores)
-				updated = true
+				updates = append(updates, &dexter.PairUpdate{
+					Addr:     *pairAddr,
+					Reserves: []*big.Int{reserve0, reserve1},
+				})
 				block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
 				if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
 					continue
 				}
-				// log.Info("Got block", "num", l.BlockNumber)
 				tx := block.Transactions[l.TxIndex]
 				data := tx.Data()
 				var method [4]byte
 				if len(data) >= 4 {
+					numUpdates++
 					copy(method[:], data[:4])
 					if methodScore, ok := methods[method]; ok {
 						methods[method] = methodScore + 1
@@ -535,28 +518,21 @@ func (d *Dexter) processIncomingLogs() {
 						methodUsers[method] = tx.To()
 					}
 				}
-				// log.Info("TX that caused updated:", "to", tx.To(), "method", method, "tx", tx)
 			}
-			if updated {
-				numUpdates++
-				pairToRouteIdxs := d.sortPairToRouteIdxMap(scores)
-				update := &PairsInfoUpdate{
-					PairsInfoUpdates: pairsInfoUpdates,
-					PairToRouteIdxs:  pairToRouteIdxs,
+			if len(updates) > 0 {
+				for _, s := range d.strategies {
+					s.ProcessPermUpdates(updates)
 				}
-				copy(update.Scores, scores)
-				d.pairsInfoUpdateChan <- update
 			}
-			if numUpdates > 1000 {
-				numUpdates = 0
-
-				log.Info("1000 updates, dumping methods")
-				methodPairs := mapToSortedBytePairs(methods)
-				for _, p := range methodPairs {
-					log.Info("Method score", "method", p.Key, "score", p.Value, "user", methodUsers[p.Key])
-				}
-				methods = make(map[[4]byte]int)
-			}
+			// if numUpdates > 1000 {
+			// 	numUpdates = 0
+			// 	log.Info("1000 updates, dumping methods")
+			// 	methodPairs := mapToSortedBytePairs(methods)
+			// 	for _, p := range methodPairs {
+			// 		log.Info("Method score", "method", p.Key, "score", p.Value, "user", methodUsers[p.Key])
+			// 	}
+			// 	methods = make(map[[4]byte]int)
+			// }
 		case <-d.inLogsSub.Err():
 			return
 		}
@@ -568,6 +544,7 @@ func (d *Dexter) processIncomingTxs() {
 	log.Info("Started dexter")
 	txCapacity := 1000
 	seenTxs := make(map[common.Hash]struct{}, txCapacity)
+	watchedTxMap := make(map[common.Hash]*FiredTx)
 	for {
 		select {
 		case tx := <-d.inTxChan:
@@ -586,49 +563,247 @@ func (d *Dexter) processIncomingTxs() {
 			seenTxs[tx.Hash()] = struct{}{}
 			// log.Info("Dexter received tx", "hash", tx.Hash().Hex())
 			d.processTx(tx)
-		case update := <-d.pairsInfoUpdateChan:
-			// log.Info("Received update", "pairs", len(update.PairsInfoUpdates), "PairToRouteIdxs", len(update.PairToRouteIdxs))
-			d.mu.Lock()
-			d.routeCache.Scores = update.Scores
-			d.routeCache.PairToRouteIdxs = update.PairToRouteIdxs
-			for pairAddr, pairInfo := range update.PairsInfoUpdates {
-				d.pairsInfo[pairAddr] = pairInfo
-			}
-			d.mu.Unlock()
-
+			d.numPending, _ = d.svc.txpool.Stats()
 		case n := <-d.inBlockChan:
 			d.lag = time.Now().Sub(n.Block.Time.Time())
-			if d.lag < 2*time.Second {
+			if d.lag < 4*time.Second {
 				go d.refreshGuns()
+			}
+			for strategyID, bravado := range d.strategyBravado {
+				d.strategyBravado[strategyID] = math.Min(1.0, bravado+0.005)
+			}
+			receipts, err := d.svc.EthAPI.GetReceipts(context.TODO(), n.Block.Hash)
+			if err != nil {
+				log.Error("Could not get block receipts", "err", err)
+				continue
+			}
+			for i, tx := range n.Block.Transactions {
+				if f, ok := watchedTxMap[tx.Hash()]; ok {
+					receipt := receipts[i]
+					if receipt.Status == types.ReceiptStatusSuccessful {
+
+						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID]*bravadoAlpha + (1 - bravadoAlpha)
+						log.Info("SUCCESS", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)))
+					} else {
+						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID] * bravadoAlpha
+						log.Info("Fail", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)))
+					}
+					delete(watchedTxMap, tx.Hash())
+				}
 			}
 		case <-d.inBlockSub.Err():
 			return
-		case <-d.inEpochChan:
-			go d.refreshGuns()
-		case <-d.inEpochSub.Err():
-			return
-		case guns := <-d.gunRefreshes:
-			// log.Info("Updated guns", "guns", guns)
-			d.guns = guns
+		case f := <-d.firedTxChan:
+			watchedTxMap[f.Hash] = f
 		case h := <-d.clearIgnoreTxChan:
 			delete(d.ignoreTxs, h)
+
 		}
 	}
 	d.inLogsSub.Unsubscribe()
 }
 
+func (d *Dexter) processTx(tx *types.Transaction) {
+	from, _ := types.Sender(d.signer, tx)
+	validators, epoch := d.svc.store.GetEpochValidators() // TODO: Move this up?
+	validatorIDs := d.predictValidators(from, tx.Nonce(), validators, epoch, numValidators)
+	d.watchedTxs <- &TxSub{Hash: tx.Hash(), PredictedValidators: validatorIDs, Print: false, StartTime: time.Now()}
+	if tx.GasPrice().Cmp(MaxGasPrice) == 1 {
+		return
+	}
+	if d.numPending > 50 {
+		if gasFloor, ok := d.gasFloors[validatorIDs[0]]; ok {
+			if tx.GasPrice().Int64() < (gasFloor+d.globalGasFloor)/2 {
+				return
+			}
+		}
+	}
+	bs := d.svc.store.GetBlockState().Copy()
+	evmStateReader := &EvmStateReader{
+		ServiceFeed: &d.svc.feed,
+		store:       d.svc.store,
+	}
+	statedb, err := d.svc.store.evm.StateDB(bs.FinalizedStateRoot)
+	if err != nil {
+		log.Info("Could not make StateDB", "err", err)
+		return
+	}
+	evmProcessor := evmcore.NewStateProcessor(
+		d.svc.store.GetRules().EvmChainConfig(),
+		evmStateReader)
+	txs := types.Transactions{tx}
+	evmBlock := d.evmBlockWith(txs, &bs, evmStateReader)
+
+	var gasUsed uint64
+	ptx := &dexter.PossibleTx{
+		Tx:           tx,
+		ValidatorIDs: validatorIDs,
+	}
+	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
+		pairAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
+		if pairAddr != nil {
+			if _, ok := d.interestedPairs[*pairAddr]; ok {
+				ptx.Updates = append(ptx.Updates, dexter.PairUpdate{
+					Addr:     *pairAddr,
+					Reserves: []*big.Int{reserve0, reserve1},
+				})
+			}
+		}
+	})
+	if len(ptx.Updates) == 0 {
+		return
+	}
+	for _, s := range d.strategies {
+		s.ProcessPossibleTx(ptx)
+	}
+}
+
+func getReservesFromSyncLog(l *types.Log) (*common.Address, *big.Int, *big.Int) {
+	if len(l.Topics) != 1 || bytes.Compare(l.Topics[0].Bytes(), syncEventTopic) != 0 {
+		return nil, nil, nil
+	}
+	reserve0 := new(big.Int).SetBytes(l.Data[:32])
+	reserve1 := new(big.Int).SetBytes(l.Data[32:])
+	return &l.Address, reserve0, reserve1
+}
+
+func (d *Dexter) runRailgun() {
+	for {
+		select {
+		case <-d.inEpochChan:
+			go d.refreshGuns()
+		case <-d.inEpochSub.Err():
+			return
+		case guns := <-d.gunRefreshes:
+			d.gunList = guns
+		case p := <-d.railgunChan:
+			bravado := d.strategyBravado[p.StrategyID]
+			probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
+			failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
+			probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(100-d.accuracy)))
+			// log.Info("Win/lose costs", "win", probAdjustedPayoff, "lose", probAdjustedFailCost, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", p.Response.NetProfit, "unadjusted lose", failCost)
+			if probAdjustedPayoff.Cmp(probAdjustedFailCost) == -1 {
+				log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado)
+				continue
+			}
+
+			gunIdx := d.gunList.Search(p.ValidatorIDs)
+			if gunIdx < 0 {
+				log.Warn("Gun list not initialized")
+				continue
+			}
+			gun := d.gunList[gunIdx] // TODO: Prevent gun reuse with multiple strategies
+			if gun.ValidatorIDs[0] != p.ValidatorIDs[0] {
+				log.Warn("Could not find validator", "validator", p.ValidatorIDs[0])
+				continue
+			}
+			wallet := gun.Wallet
+			account := wallet.Accounts()[0]
+			nonce := d.svc.txpool.Nonce(account.Address)
+			// log.Info("Source tx", "url", "https://ftmscan.com/tx/"+tx.Hash().Hex())
+			var fishCall []byte
+			if p.Type == dexter.SwapSinglePath {
+				fishCall = fish3_lite.SwapSinglePath(dexter.MaxAmountIn, p.Response.GasCost, p.Response.Path, fishAddr)
+			} else {
+				log.Error("Unsupported call type", "type", p.Type)
+				continue
+			}
+			fishTx := types.NewTransaction(nonce, fishAddr, common.Big0, 6e5, p.Target.GasPrice(), fishCall)
+			signedTx, err := wallet.SignTx(account, fishTx, d.svc.store.GetRules().EvmChainConfig().ChainID)
+			if err != nil {
+				log.Error("Could not sign tx", "err", err)
+				return
+			}
+			// TODO: Here is a fine spot to write onto txLagRequestChan
+			log.Info("FIRING GUN pew pew", "addr", account.Address, "targetTo", p.Target.To(),
+				"target", p.Target.Hash().Hex(), "gas", p.Target.GasPrice(), "size", p.Target.Size())
+			// log.Info("Fired tx", "url", "https://ftmscan.com/tx/"+signedTx.Hash().Hex())
+			d.ignoreTxs[p.Target.Hash()] = struct{}{}
+			go d.fireGun(wallet, signedTx, p, gun.ValidatorIDs)
+		}
+	}
+}
+
+func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx *types.Transaction, p *dexter.RailgunPacket, gunValidatorIDs []idx.ValidatorID) {
+	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
+	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target, signedTx})
+	d.svc.txpool.AddLocal(signedTx)
+	d.watchedTxs <- &TxSub{
+		Hash:                p.Target.Hash(),
+		Label:               "target",
+		PredictedValidators: p.ValidatorIDs,
+		Print:               true,
+		StartTime:           time.Now(),
+	}
+	d.watchedTxs <- &TxSub{
+		Hash:                signedTx.Hash(),
+		Label:               p.Target.Hash().Hex(),
+		PredictedValidators: gunValidatorIDs,
+		TargetValidators:    p.ValidatorIDs,
+		Print:               true,
+		StartTime:           time.Now(),
+	}
+	d.firedTxChan <- &FiredTx{
+		Hash:       signedTx.Hash(),
+		StrategyID: p.StrategyID,
+		Time:       time.Now(),
+	}
+}
+
 func (d *Dexter) watchEvents() {
 	watchedTxMap := make(map[common.Hash]*TxSub)
+	gasAlpha1 := int64(100.0 * gasAlpha)
+	gasAlpha2 := int64(100.0 * (1.0 - gasAlpha))
 	for {
 		select {
 		case e := <-d.inEventChan:
-			// log.Info("New event", "event", e, "creator", e.Locator().Creator, "txs", e.Txs())
+			interested := false
+			txLabels := make(map[common.Hash]string)
+			var lowestGas int64 = 0
 			for _, tx := range e.Txs() {
+				lowestGas = tx.GasPrice().Int64()
 				if sub, ok := watchedTxMap[tx.Hash()]; ok {
-					log.Info("Watched event", "id", e.ID(), "lamport", e.Locator().Lamport, "creator", e.Locator().Creator, "predicted", sub.PredictedValidators, "tx", tx.Hash().Hex(), "label", sub.Label)
+					var msg string
+					if e.Locator().Creator == sub.PredictedValidators[0] {
+						d.accuracy = d.accuracy*accuracyAlpha + 100.0*(1-accuracyAlpha)
+						msg = "Correct validator prediction"
+					} else {
+						d.accuracy = d.accuracy * accuracyAlpha
+						msg = "Wrong validator prediction"
+					}
+					if sub.Print {
+						interested = true
+						log.Info(msg, "id", e.ID(), "lamport", e.Locator().Lamport, "creator", e.Locator().Creator, "predicted", sub.PredictedValidators, "target", sub.TargetValidators, "lag", utils.PrettyDuration(time.Now().Sub(sub.StartTime)), "tx", tx.Hash().Hex(), "label", sub.Label)
+						if sub.Label == "target" {
+							txLabels[tx.Hash()] = "TARGET"
+						} else {
+							txLabels[tx.Hash()] = sub.Label
+						}
+					}
 					delete(watchedTxMap, tx.Hash())
 					d.clearIgnoreTxChan <- tx.Hash()
 				}
+			}
+			if interested {
+				for _, tx := range e.Txs() {
+					var txLabel string
+					if label, ok := txLabels[tx.Hash()]; ok {
+						txLabel = label
+					} else {
+						to := tx.To()
+						if to != nil {
+							if toLabel, ok := contracts[*tx.To()]; ok {
+								txLabel = toLabel
+							}
+						}
+					}
+					log.Info("TX in interesting event block", "nonce", tx.Nonce(), "gas price", tx.GasPrice(), "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
+				}
+			}
+			if lowestGas != 0 && len(e.Txs()) > 1 {
+				prevGasFloor := d.gasFloors[e.Locator().Creator]
+				d.gasFloors[e.Locator().Creator] = (prevGasFloor*gasAlpha1 + lowestGas*gasAlpha2) / 100
+				d.globalGasFloor = (d.globalGasFloor*gasAlpha1 + lowestGas*gasAlpha2) / 100
 			}
 		case w := <-d.watchedTxs:
 			watchedTxMap[w.Hash] = w
@@ -721,407 +896,4 @@ func (d *Dexter) evmHeader(bs *iblockproc.BlockState, reader evmcore.DummyChain)
 
 func (d *Dexter) evmBlockWith(txs types.Transactions, bs *iblockproc.BlockState, reader evmcore.DummyChain) *evmcore.EvmBlock {
 	return evmcore.NewEvmBlock(d.evmHeader(bs, reader), txs)
-}
-
-func (d *Dexter) processTx(tx *types.Transaction) {
-	start := time.Now()
-	data := tx.Data()
-	if len(data) < 4 {
-		return
-	}
-	method := data[:4]
-
-	bs := d.svc.store.GetBlockState().Copy()
-	evmStateReader := &EvmStateReader{
-		ServiceFeed: &d.svc.feed,
-		store:       d.svc.store,
-	}
-	statedb, err := d.svc.store.evm.StateDB(bs.FinalizedStateRoot)
-	if err != nil {
-		log.Info("Could not make StateDB", "err", err)
-		return
-	}
-	evmProcessor := evmcore.NewStateProcessor(
-		d.svc.store.GetRules().EvmChainConfig(),
-		evmStateReader)
-	txs := types.Transactions{tx}
-	evmBlock := d.evmBlockWith(txs, &bs, evmStateReader)
-
-	var gasUsed uint64
-	pairsInfoOverride := make(map[common.Address]*PairInfo)
-	var updatedKeys []PairKey
-	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
-		pairAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
-		if pairAddr != nil {
-			if pairInfo, ok := d.pairsInfo[*pairAddr]; ok {
-				pairsInfoOverride[*pairAddr] = &PairInfo{
-					reserve0:     reserve0,
-					reserve1:     reserve1,
-					token0:       pairInfo.token0,
-					token1:       pairInfo.token1,
-					feeNumerator: pairInfo.feeNumerator,
-				}
-				updatedKeys = append(updatedKeys,
-					pairKeyFromAddrs(pairInfo.token0, pairInfo.token1, *pairAddr),
-					pairKeyFromAddrs(pairInfo.token1, pairInfo.token0, *pairAddr))
-			}
-		}
-	})
-	if len(updatedKeys) == 0 {
-		return
-	}
-	// log.Info("Finished processing tx", "hash", tx.Hash().Hex(), "t", utils.PrettyDuration(time.Now().Sub(start)), "updatedKeys", len(updatedKeys))
-	// for pairAddr, pairInfo := range pairsInfoOverride {
-	// 	log.Info("PairInfo override", "pairAddr", pairAddr, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1, "info", *pairInfo)
-	// }
-	var allProfitableRoutes []uint
-	candidateRoutes := 0
-	for _, key := range updatedKeys {
-		// log.Info("Evaluating updated key", "key", key)
-		profitableRoutes := d.getProfitableRoutes(key, pairsInfoOverride)
-		allProfitableRoutes = append(allProfitableRoutes, profitableRoutes...)
-		candidateRoutes += len(d.routeCache.PairToRouteIdxs[key])
-	}
-	sort.Slice(allProfitableRoutes, func(a, b int) bool { return allProfitableRoutes[a] < allProfitableRoutes[b] })
-	allProfitableRoutes = uniq(allProfitableRoutes)
-	plan := d.getMostProfitablePath(allProfitableRoutes, pairsInfoOverride, tx.GasPrice())
-	if plan == nil {
-		return
-	}
-	log.Info("Target tx", "profitable", len(allProfitableRoutes), "/", candidateRoutes, "t", utils.PrettyDuration(time.Now().Sub(start)), "method", method, "hash", tx.Hash().Hex(), "gasPrice", tx.GasPrice(), "size", tx.Size())
-	d.txLagRequestChan <- tx.Hash()
-	log.Info("Found plan which is profitable after gas", "plan", plan)
-	validators, epoch := d.svc.store.GetEpochValidators()
-	from, err := types.Sender(d.signer, tx)
-	if err != nil {
-		log.Info("Could not get From for tx", "tx", tx.Hash().Hex(), "err", err)
-		return
-	}
-	validatorIDs := d.predictValidators(from, tx.Nonce(), validators, epoch, 3)
-	log.Info("Predicted validator", "validators", validatorIDs)
-	gunQ, ok := d.guns[validatorIDs[0]]
-	if !ok || len(gunQ) == 0 {
-		log.Warn("Could not find validator", "validator", validatorIDs[0])
-		return
-	}
-	wallet := gunQ[0]
-	d.guns[validatorIDs[0]] = gunQ[1:]
-	fishCall := fish3_lite.SwapSinglePath(maxAmountIn, plan.GasCost, plan.Path, fishAddr)
-	account := wallet.Accounts()[0]
-	nonce := d.svc.txpool.Nonce(account.Address)
-	// log.Info("Source tx", "url", "https://ftmscan.com/tx/"+tx.Hash().Hex())
-	fishTx := types.NewTransaction(nonce, fishAddr, common.Big0, 6e5, tx.GasPrice(), fishCall)
-	signedTx, err := wallet.SignTx(account, fishTx, d.svc.store.GetRules().EvmChainConfig().ChainID)
-	if err != nil {
-		log.Error("Could not sign tx", "err", err)
-		return
-	}
-	log.Info("FIRING GUN pew pew", "addr", account.Address, "targetTo", tx.To(), "method", method,
-		"target", tx.Hash().Hex(), "gas", tx.GasPrice(), "size", tx.Size())
-	// log.Info("Fired tx", "url", "https://ftmscan.com/tx/"+signedTx.Hash().Hex())
-	d.ignoreTxs[tx.Hash()] = struct{}{}
-	go d.fireGun(wallet, signedTx, tx, validatorIDs)
-
-}
-
-func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx, targetTx *types.Transaction, validatorIDs []idx.ValidatorID) {
-	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
-	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{targetTx, signedTx})
-	d.svc.txpool.AddLocal(signedTx)
-	d.watchedTxs <- &TxSub{Hash: targetTx.Hash(), Label: "source", PredictedValidators: validatorIDs}
-	d.watchedTxs <- &TxSub{Hash: signedTx.Hash(), Label: targetTx.Hash().Hex(), PredictedValidators: validatorIDs}
-}
-
-func getReservesFromSyncLog(l *types.Log) (*common.Address, *big.Int, *big.Int) {
-	if len(l.Topics) != 1 || bytes.Compare(l.Topics[0].Bytes(), syncEventTopic) != 0 {
-		return nil, nil, nil
-	}
-	reserve0 := new(big.Int).SetBytes(l.Data[:32])
-	reserve1 := new(big.Int).SetBytes(l.Data[32:])
-	// if reserve0.BitLen() == 0 || reserve1.BitLen() == 0 {
-	// 	log.Info("WARNING: getReservesFromSyncLog() returned 0", "addr", l.Address, "reserve0", reserve0, "reserve1", reserve1, "returnData", l.Data)
-	// }
-	return &l.Address, reserve0, reserve1
-}
-
-func uniq(sortedSlice []uint) (res []uint) {
-	prev := ^uint(0) // MaxUint
-	for _, v := range sortedSlice {
-		if v != prev {
-			res = append(res, v)
-			prev = v
-		}
-	}
-	return
-}
-
-func pairKeyFromStrs(from, to, pairAddr string) PairKey {
-	return pairKeyFromAddrs(common.HexToAddress(from), common.HexToAddress(to), common.HexToAddress(pairAddr))
-}
-
-func pairKeyFromAddrs(from, to, pairAddr common.Address) PairKey {
-	var key PairKey
-	copy(key[:20], from[:])
-	copy(key[20:], to[:])
-	copy(key[40:], pairAddr[:])
-	return key
-}
-
-func getAmountOut(amountIn, reserveIn, reserveOut, feeNumerator *big.Int) *big.Int {
-	tenToSix := big.NewInt(int64(1e6))
-	amountInWithFee := new(big.Int).Mul(amountIn, feeNumerator)
-	numerator := new(big.Int).Mul(amountInWithFee, reserveOut)
-	denominator := new(big.Int).Mul(reserveIn, tenToSix)
-	denominator = denominator.Add(denominator, amountInWithFee)
-	if denominator.BitLen() == 0 {
-		log.Info("WARNING: getAmountOut returning 0", "reserveIn", reserveIn, "reserveOut", reserveOut, "amountIn", amountIn)
-		return big.NewInt(0)
-	}
-	return numerator.Div(numerator, denominator)
-}
-
-func (d *Dexter) getPairInfo(pairsInfoOverride map[common.Address]*PairInfo, pairAddr common.Address) *PairInfo {
-	if pairsInfoOverride != nil {
-		if pairInfo, ok := pairsInfoOverride[pairAddr]; ok {
-			if pairInfo.reserve0.BitLen() == 0 || pairInfo.reserve1.BitLen() == 0 {
-				log.Info("WARNING: getPairInfo found override with 0 reserve0 or reserve1", "Addr", pairAddr, "len", len(pairsInfoOverride))
-			}
-			return pairInfo
-		}
-	}
-	d.mu.RLock()
-	pairInfo := d.pairsInfo[pairAddr]
-	d.mu.RUnlock()
-	if pairInfo.reserve0.BitLen() == 0 || pairInfo.reserve1.BitLen() == 0 {
-		log.Info("WARNING: getPairInfo found baseline with 0 reserve0 or reserve1", "Addr", pairAddr, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1)
-	}
-	return pairInfo
-}
-
-func (d *Dexter) getRouteAmountOut(route []*Leg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
-	var amountOut *big.Int
-	for _, leg := range route {
-		pairInfo := d.getPairInfo(pairsInfoOverride, leg.PairAddr)
-		var reserveFrom *big.Int
-		var reserveTo *big.Int
-		if bytes.Compare(pairInfo.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserveFrom, reserveTo = pairInfo.reserve0, pairInfo.reserve1
-		} else {
-			reserveFrom, reserveTo = pairInfo.reserve1, pairInfo.reserve0
-		}
-		amountOut = getAmountOut(amountIn, reserveFrom, reserveTo, pairInfo.feeNumerator)
-		amountIn = amountOut
-	}
-	return amountOut
-}
-
-func (d *Dexter) getRouteAmountOutDebug(route []*Leg, amountIn *big.Int, pairsInfoOverride map[common.Address]*PairInfo, label string) *big.Int {
-	var amountOut *big.Int
-	for i, leg := range route {
-		pairInfo := d.getPairInfo(pairsInfoOverride, leg.PairAddr)
-		var reserveFrom *big.Int
-		var reserveTo *big.Int
-		if bytes.Compare(pairInfo.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserveFrom, reserveTo = pairInfo.reserve0, pairInfo.reserve1
-		} else {
-			reserveFrom, reserveTo = pairInfo.reserve1, pairInfo.reserve0
-		}
-		amountOut = getAmountOut(amountIn, reserveFrom, reserveTo, pairInfo.feeNumerator)
-		log.Info("DEBUG", "label", label, "i", i, "amountIn", amountIn, "amountOut", amountOut, "reserveFrom", reserveFrom, "reserveTo", reserveTo, "feeNumerator", pairInfo.feeNumerator)
-		amountIn = amountOut
-	}
-	return amountOut
-}
-
-func (d *Dexter) getProfitableRoutes(key PairKey, pairsInfoOverride map[common.Address]*PairInfo) []uint {
-	if routeIdxs, ok := d.routeCache.PairToRouteIdxs[key]; ok {
-		for i, routeIdx := range routeIdxs {
-			route := d.routeCache.Routes[routeIdx]
-			amountOut := d.getRouteAmountOut(route, startTokensIn, pairsInfoOverride)
-			if amountOut.Cmp(startTokensIn) < 1 {
-				return routeIdxs[:i]
-				// if end == -1 {
-				// 	end = i
-				// }
-				// } else if end > -1 {
-				// log.Warn("Profitable route detected after end", "end", end, "i", i)
-			}
-		}
-	}
-	return nil
-}
-
-func (d *Dexter) getScore(route []*Leg, pairsInfoOverride map[common.Address]*PairInfo) uint64 {
-	amountOut := d.getRouteAmountOut(route, startTokensIn, pairsInfoOverride)
-	amountOut.Div(amountOut, big.NewInt(1e12))
-	return uint64(amountOut.Int64())
-}
-
-func (d *Dexter) refreshScores() {
-	for i, route := range d.routeCache.Routes {
-		d.routeCache.Scores[i] = d.getScore(route, nil)
-	}
-}
-
-func (d *Dexter) refreshScoresForPair(key PairKey, pairsInfoOverride map[common.Address]*PairInfo, scores []uint64) {
-	if routeIdxs, ok := d.routeCache.PairToRouteIdxs[key]; ok {
-		for _, routeIdx := range routeIdxs {
-			route := d.routeCache.Routes[routeIdx]
-			scores[routeIdx] = d.getScore(route, pairsInfoOverride)
-		}
-	}
-}
-
-func (d *Dexter) sortPairToRouteIdxMap(scores []uint64) map[PairKey][]uint {
-	pairToRouteIdxs := make(map[PairKey][]uint, len(d.routeCache.PairToRouteIdxs))
-	d.mu.RLock()
-	for pairKey, routeIdxs := range d.routeCache.PairToRouteIdxs {
-		newRouteIdxs := make([]uint, len(routeIdxs))
-		copy(newRouteIdxs, routeIdxs)
-		pairToRouteIdxs[pairKey] = newRouteIdxs
-	}
-	d.mu.RUnlock()
-	for _, routeIdxs := range pairToRouteIdxs {
-		sort.Slice(routeIdxs, func(a, b int) bool {
-			return scores[routeIdxs[a]] > scores[routeIdxs[b]]
-		})
-	}
-	return pairToRouteIdxs
-}
-
-func (d *Dexter) getRouteOptimalAmountIn(route []*Leg, pairsInfoOverride map[common.Address]*PairInfo) *big.Int {
-	startPairInfo := d.getPairInfo(pairsInfoOverride, route[0].PairAddr)
-	leftAmount, rightAmount := new(big.Int), new(big.Int)
-	if bytes.Compare(startPairInfo.token0.Bytes(), route[0].From.Bytes()) == 0 {
-		leftAmount.Set(startPairInfo.reserve0)
-		rightAmount.Set(startPairInfo.reserve1)
-	} else {
-		leftAmount.Set(startPairInfo.reserve1)
-		rightAmount.Set(startPairInfo.reserve0)
-	}
-	// log.Info("Starting getRouteOptimalAmountIn", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserve0", startPairInfo.reserve0, "reserve1", startPairInfo.reserve1, "startPairInfo", *startPairInfo)
-	r1 := startPairInfo.feeNumerator
-	tenToSix := big.NewInt(int64(1e6))
-	for _, leg := range route[1:] {
-		pairInfo := d.getPairInfo(pairsInfoOverride, leg.PairAddr)
-		var reserveFrom, reserveTo *big.Int
-		if bytes.Compare(pairInfo.token0.Bytes(), leg.From.Bytes()) == 0 {
-			reserveFrom, reserveTo = pairInfo.reserve0, pairInfo.reserve1
-		} else {
-			reserveTo, reserveFrom = pairInfo.reserve0, pairInfo.reserve1
-		}
-		legFee := pairInfo.feeNumerator
-		den := new(big.Int).Mul(rightAmount, legFee)
-		den = den.Div(den, tenToSix)
-		den = den.Add(den, reserveFrom)
-
-		// log.Info("getRouteOptimalAmountIn step", "leftAmount", leftAmount, "rightAmount", rightAmount, "reserveFrom", reserveFrom, "reserveTo", reserveTo, "reserve0", pairInfo.reserve0, "reserve1", pairInfo.reserve1, "den", den, "from", leg.From.Bytes()[:2], "token0", pairInfo.token0.Bytes()[:2])
-		leftAmount = leftAmount.Mul(leftAmount, reserveFrom)
-		leftAmount = leftAmount.Div(leftAmount, den)
-
-		rightAmount = rightAmount.Mul(rightAmount, reserveTo)
-		rightAmount = rightAmount.Mul(rightAmount, legFee)
-		rightAmount = rightAmount.Div(rightAmount, tenToSix)
-		rightAmount = rightAmount.Div(rightAmount, den)
-	}
-	// log.Info("Computed left and right", "leftAmount", leftAmount, "rightAmount", rightAmount, "lbits", leftAmount.BitLen(), "rbits", rightAmount.BitLen())
-	amountIn := new(big.Int).Mul(rightAmount, leftAmount)
-	amountIn = amountIn.Mul(amountIn, r1)
-	amountIn = amountIn.Div(amountIn, tenToSix)
-	amountIn = amountIn.Sqrt(amountIn)
-	amountIn = amountIn.Sub(amountIn, leftAmount)
-	amountIn = amountIn.Mul(amountIn, tenToSix)
-	amountIn = amountIn.Div(amountIn, r1)
-	if amountIn.Cmp(maxAmountIn) == 1 { // amountIn > maxAmountIn
-		return maxAmountIn
-	}
-	return amountIn
-}
-
-func estimateFishGas(numTransfers, numSwaps int, gasPrice *big.Int) *big.Int {
-	gas := GAS_INITIAL + (GAS_TRANSFER * numTransfers) + (GAS_SWAP * numSwaps)
-	return new(big.Int).Mul(gasPrice, big.NewInt(int64(gas)))
-}
-
-func estimateFailureCost(gasPrice *big.Int) *big.Int {
-	return new(big.Int).Mul(gasPrice, big.NewInt(GAS_FAIL*1))
-}
-
-func (d *Dexter) getMostProfitablePath(routeIdxs []uint, pairsInfoOverride map[common.Address]*PairInfo, gasPrice *big.Int) *Plan {
-	maxProfit := new(big.Int)
-	var bestAmountIn, bestAmountOut, bestGas *big.Int
-	var bestRouteIdx uint
-	for _, routeIdx := range routeIdxs {
-		route := d.routeCache.Routes[routeIdx]
-		amountIn := d.getRouteOptimalAmountIn(route, pairsInfoOverride)
-		if amountIn.Sign() == -1 {
-			log.Info("WARNING: Negative amountIn for route", "routeIdx", routeIdx, "amountIn", amountIn)
-			amountOut := d.getRouteAmountOut(route, startTokensIn, pairsInfoOverride)
-			log.Info("Amount out for startTokensIn", "routeIdx", routeIdx, "amountOut", amountOut)
-
-			continue
-		}
-		amountOut := d.getRouteAmountOut(route, amountIn, pairsInfoOverride)
-		if amountOut.Cmp(amountIn) == -1 {
-			// log.Info("WARNING: Negative profit for route")
-			continue
-		}
-		profit := new(big.Int).Sub(amountOut, amountIn)
-
-		// if amountIn.Cmp(maxAmountIn) == -1 {
-		// 	amountIn2 := new(big.Int).Add(amountIn, new(big.Int).Div(amountIn, big.NewInt(2)))
-		// 	if amountIn2.Cmp(maxAmountIn) == 1 {
-		// 		amountIn2 = maxAmountIn
-		// 	}
-		// 	amountOut2 := d.getRouteAmountOut(route, amountIn2, pairsInfoOverride)
-		// 	profit2 := new(big.Int).Sub(amountOut2, amountIn2)
-		// 	if profit2.Cmp(profit) == 1 {
-		// 		log.Warn("Profit2 > profit", "amountIn", amountIn, "amountOut", amountOut, "amountIn2", amountIn2, "amountOut2", amountOut2, "profit", profit, "profit2", profit2)
-		// 		// d.getRouteAmountOutDebug(route, amountIn, pairsInfoOverride, "conventional")
-		// 		// d.getRouteAmountOutDebug(route, amountIn2, pairsInfoOverride, "plus sized")
-		// 	}
-		// }
-
-		gas := estimateFishGas(1, len(route), gasPrice)
-		netProfit := new(big.Int).Sub(profit, gas)
-		netProfitSubFailures := new(big.Int).Sub(netProfit, estimateFailureCost(gasPrice))
-		if netProfitSubFailures.Cmp(maxProfit) == -1 {
-			continue
-		}
-		// log.Info("New most profitable route", "amountIn", amountIn, "amountOut", amountOut, "profit", profit, "netProfit", netProfit, "gas", gas, "maxProfit", maxProfit, "routeIdx", routeIdx)
-		maxProfit = netProfit
-		bestAmountIn = amountIn
-		bestAmountOut = amountOut
-		bestGas = gas
-		bestRouteIdx = routeIdx
-	}
-	if maxProfit.BitLen() == 0 {
-		return nil
-	}
-	log.Info("Best route", "routeIdx", bestRouteIdx, "bestAmountIn", bestAmountIn, "bestAmountOut", bestAmountOut, "bestGas", bestGas)
-	return d.makePlan(bestRouteIdx, bestGas, gasPrice, bestAmountIn)
-}
-
-func (d *Dexter) makePlan(routeIdx uint, gasCost, gasPrice, amountIn *big.Int) *Plan {
-	route := d.routeCache.Routes[routeIdx]
-	plan := &Plan{
-		GasPrice: gasPrice,
-		GasCost:  gasCost,
-		AmountIn: amountIn,
-		Path:     make([]fish3_lite.SwapCommand, len(route)),
-	}
-	for i, leg := range route {
-		pairInfo := d.pairsInfo[leg.PairAddr] // No need to use override as we don't look up reserves
-		fromToken0 := bytes.Compare(pairInfo.token0.Bytes(), leg.From.Bytes()) == 0
-		plan.Path[i] = fish3_lite.SwapCommand{
-			Pair:         leg.PairAddr,
-			Token0:       pairInfo.token0,
-			Token1:       pairInfo.token1,
-			Fraction:     big.NewInt(1),
-			FeeNumerator: pairInfo.feeNumerator,
-			FromToken0:   fromToken0,
-			SwapTo:       0,
-		}
-	}
-	return plan
 }
