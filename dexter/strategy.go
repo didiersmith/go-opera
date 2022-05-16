@@ -1,9 +1,10 @@
 package dexter
 
 import (
+	"bytes"
 	"math/big"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish3_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish4_lite"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -12,7 +13,7 @@ import (
 
 var (
 	startTokensIn = new(big.Int).Exp(big.NewInt(10), big.NewInt(19), nil)
-	MaxAmountIn   = new(big.Int).Mul(big.NewInt(2021), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	MaxAmountIn   = new(big.Int).Mul(big.NewInt(2547), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 )
 
 const (
@@ -32,47 +33,40 @@ const (
 	SwapSinglePath FishCallType = iota
 )
 
-type PairKey [60]byte
+type PoolKey [60]byte
+type EdgeKey [40]byte
 
 type PossibleTx struct {
 	Tx             *types.Transaction
-	Updates        []PairUpdate
-	AvoidPairAddrs []*common.Address
+	Updates        []PoolUpdate
+	AvoidPoolAddrs []*common.Address
 	ValidatorIDs   []idx.ValidatorID
 }
 
-type PairUpdate struct {
+type PoolUpdate struct {
 	Addr     common.Address
 	Reserves []*big.Int
 }
 
 type PoolInfo struct {
-	Address      common.Address
-	PoolType     string
-	SwapFee      float64
-	Reserves     []*big.Int
-	Token0       common.Address
-	Token1       common.Address
+	Reserves     map[common.Address]*big.Int
+	Tokens       []common.Address
+	Weights      []*big.Int
 	FeeNumerator *big.Int
 }
 
-type PairInfo struct {
-	Reserves     []*big.Int
-	Token0       common.Address
-	Token1       common.Address
-	FeeNumerator *big.Int
-}
-
-type PairsInfoUpdate struct {
-	PairsInfoUpdates map[common.Address]*PairInfo
-	PairToRouteIdxs  map[PairKey][]uint
+type PoolsInfoUpdate struct {
+	PoolsInfoUpdates map[common.Address]*PoolInfo
+	PoolToRouteIdxs  map[PoolKey][]uint
+	AggregatePools   map[EdgeKey]*PoolInfo
 }
 
 type Strategy interface {
 	ProcessPossibleTx(ptx *PossibleTx)
-	ProcessPermUpdates(us []*PairUpdate)
-	GetInterestedPairs() map[common.Address]struct{}
-	SetPairsInfo(pairsInfo map[common.Address]*PairInfo)
+	ProcessPermUpdates(us []*PoolUpdate)
+	GetInterestedPools() map[common.Address]struct{}
+	SetPoolsInfo(poolsInfo map[common.Address]*PoolInfo)
+	SetEdgePools(edgePools map[EdgeKey][]common.Address)
 	Start()
 	AddSubStrategy(Strategy)
 }
@@ -82,30 +76,45 @@ type Plan struct {
 	GasPrice  *big.Int
 	GasCost   *big.Int
 	NetProfit *big.Int
-	Path      []fish3_lite.SwapCommand
+	MinProfit *big.Int
+	Path      []fish4_lite.LinearSwapCommand
+}
+
+type LegacyLegJson struct {
+	From         string `json:from`
+	To           string `json:to`
+	PairAddr     string `json:pairAddr`
+	ExchangeType string `json:exchangeType`
+}
+
+type LegacyRouteCacheJson struct {
+	Routes          [][]LegacyLegJson `json:routes`
+	PoolToRouteIdxs map[string][]uint `json:pairToRouteIdxs`
 }
 
 type LegJson struct {
-	From     string `json:from`
-	To       string `json:to`
-	PairAddr string `json:pairAddr`
+	From         string `json:from`
+	To           string `json:to`
+	PoolAddr     string `json:poolAddr`
+	ExchangeType string `json:exchangeType`
 }
 
 type RouteCacheJson struct {
 	Routes          [][]LegJson       `json:routes`
-	PairToRouteIdxs map[string][]uint `json:pairToRouteIdxs`
+	PoolToRouteIdxs map[string][]uint `json:pairToRouteIdxs`
 }
 
 type RouteCache struct {
 	Routes          [][]*Leg
-	PairToRouteIdxs map[PairKey][]uint
+	PoolToRouteIdxs map[PoolKey][]uint
 	Scores          []uint64
 }
 
 type Leg struct {
-	From     common.Address
-	To       common.Address
-	PairAddr common.Address
+	From         common.Address
+	To           common.Address
+	PoolAddr     common.Address
+	ExchangeType string
 }
 
 type RailgunPacket struct {
@@ -138,17 +147,17 @@ func getAmountOutUniswap(amountIn, reserveIn, reserveOut, feeNumerator *big.Int)
 	return numerator.Div(numerator, denominator)
 }
 
-// Get the PairInfo from pairsInfoOverride first, and pairsInfo if not found in pairsInfoOverride.
-// If PairsInfo is protected with a mutex, you must hold it while calling this.
+// Get the PoolInfo from poolsInfoOverride first, and poolsInfo if not found in poolsInfoOverride.
+// If PoolsInfo is protected with a mutex, you must hold it while calling this.
 // TODO: Check calls to this function to make sure they're mutexed.
-func getPairInfo(pairsInfo, pairsInfoOverride map[common.Address]*PairInfo, pairAddr common.Address) *PairInfo {
-	if pairsInfoOverride != nil {
-		if pairInfo, ok := pairsInfoOverride[pairAddr]; ok {
-			return pairInfo
+func getPoolInfo(poolsInfo, poolsInfoOverride map[common.Address]*PoolInfo, poolAddr common.Address) *PoolInfo {
+	if poolsInfoOverride != nil {
+		if poolInfo, ok := poolsInfoOverride[poolAddr]; ok {
+			return poolInfo
 		}
 	}
-	pairInfo := pairsInfo[pairAddr]
-	return pairInfo
+	poolInfo := poolsInfo[poolAddr]
+	return poolInfo
 }
 
 func uniq(sortedSlice []uint) (res []uint) {
@@ -162,14 +171,67 @@ func uniq(sortedSlice []uint) (res []uint) {
 	return
 }
 
-func pairKeyFromStrs(from, to, pairAddr string) PairKey {
-	return pairKeyFromAddrs(common.HexToAddress(from), common.HexToAddress(to), common.HexToAddress(pairAddr))
+func poolKeyFromStrs(from, to, poolAddr string) PoolKey {
+	return poolKeyFromAddrs(common.HexToAddress(from), common.HexToAddress(to), common.HexToAddress(poolAddr))
 }
 
-func pairKeyFromAddrs(from, to, pairAddr common.Address) PairKey {
-	var key PairKey
+func poolKeyFromAddrs(from, to, poolAddr common.Address) PoolKey {
+	var key PoolKey
 	copy(key[:20], from[:])
 	copy(key[20:], to[:])
-	copy(key[40:], pairAddr[:])
+	copy(key[40:], poolAddr[:])
 	return key
+}
+
+func MakeEdgeKey(a, b common.Address) (key EdgeKey) {
+	if bytes.Compare(a.Bytes(), b.Bytes()) < 0 {
+		copy(key[:20], a[:])
+		copy(key[20:], b[:])
+	} else {
+		copy(key[:20], b[:])
+		copy(key[20:], a[:])
+	}
+	return key
+}
+
+func refreshAggregatePool(key EdgeKey, pools []common.Address, poolsInfo, poolsInfoOverride map[common.Address]*PoolInfo) *PoolInfo {
+	token0 := common.BytesToAddress(key[:20])
+	token1 := common.BytesToAddress(key[20:])
+	agg := &PoolInfo{
+		Reserves: map[common.Address]*big.Int{token0: big.NewInt(0), token1: big.NewInt(0)},
+		Tokens:   []common.Address{token0, token1},
+	}
+	for _, poolAddr := range pools {
+		pi := getPoolInfo(poolsInfo, poolsInfoOverride, poolAddr)
+		agg.Reserves[Tokens[0]].Add(agg.Reserves[Tokens[0]], pi.Reserves[Tokens[0]])
+		agg.Reserves[Tokens[1]].Add(agg.Reserves[Tokens[1]], pi.Reserves[Tokens[1]])
+	}
+	return agg
+}
+
+func makeAggregatePools(edgePools map[EdgeKey][]common.Address, poolsInfo, poolsInfoOverride map[common.Address]*PoolInfo) map[EdgeKey]*PoolInfo {
+	aggs := make(map[EdgeKey]*PoolInfo)
+	for key, pools := range edgePools {
+		aggs[key] = refreshAggregatePool(key, pools, poolsInfo, poolsInfoOverride)
+	}
+	return aggs
+}
+
+func convert(fromToken, toToken common.Address, amount *big.Int, aggregatePools map[EdgeKey]*PoolInfo) *big.Int {
+	if bytes.Compare(fromToken.Bytes(), toToken.Bytes()) == 0 {
+		return amount
+	}
+	key := MakeEdgeKey(fromToken, toToken)
+	pool, ok := aggregatePools[key]
+	if !ok {
+		//log.Error("Could not find aggregate pool", "key", key, "len", len(aggregatePools), "fromToken", fromToken, "toToken", toToken)
+		return big.NewInt(0)
+	}
+	if bytes.Compare(fromToken.Bytes(), pool.Tokens[0].Bytes()) == 0 {
+		x := big.NewInt(0).Mul(amount, pool.Reserves[1])
+		return x.Div(x, pool.Reserves[0])
+	} else {
+		x := big.NewInt(0).Mul(amount, pool.Reserves[0])
+		return x.Div(x, pool.Reserves[1])
+	}
 }

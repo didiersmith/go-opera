@@ -1,9 +1,13 @@
 package dexter
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"math"
+	"math/big"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,18 +19,19 @@ type BalancerLinearStrategy struct {
 	ID                  int
 	RailgunChan         chan *RailgunPacket
 	inPossibleTxsChan   chan *PossibleTx
-	inPermUpdatesChan   chan []*PairUpdate
+	inPermUpdatesChan   chan []*PoolUpdate
 	cfg                 BalancerLinearStrategyConfig
-	poolsInfo           map[common.Address]*PairInfo
-	poolsInfoUpdateChan chan *PairsInfoUpdate
-	interestedPairs     map[common.Address]struct{}
+	poolsInfo           map[common.Address]*PoolInfo
+	poolsInfoUpdateChan chan *PoolsInfoUpdate
+	interestedPools     map[common.Address]struct{}
+	edgePools           map[EdgeKey][]common.Address
 	routeCache          RouteCache
 	subStrategies       []Strategy
 	mu                  sync.RWMutex
 }
 
 type BalancerLinearStrategyConfig struct {
-	PoolsFileName           string
+	RoutesFileName          string
 	PoolToRouteIdxsFileName string
 	SelectSecondBest        bool
 }
@@ -37,32 +42,36 @@ func NewBalancerLinearStrategy(name string, id int, railgun chan *RailgunPacket,
 		ID:                  id,
 		RailgunChan:         railgun,
 		inPossibleTxsChan:   make(chan *PossibleTx, 256),
-		inPermUpdatesChan:   make(chan []*PairUpdate, 256),
+		inPermUpdatesChan:   make(chan []*PoolUpdate, 256),
 		cfg:                 cfg,
-		poolsInfo:           make(map[common.Address]*PairInfo),
-		poolsInfoUpdateChan: make(chan *PairsInfoUpdate),
-		interestedPairs:     make(map[common.Address]struct{}),
+		poolsInfo:           make(map[common.Address]*PoolInfo),
+		poolsInfoUpdateChan: make(chan *PoolsInfoUpdate),
+		interestedPools:     make(map[common.Address]struct{}),
 	}
 	s.loadJson()
 	return s
 }
 
-func (s *BalancerLinearStrategy) SetPairsInfo(poolsInfo map[common.Address]*PairInfo) {
+func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*PoolInfo) {
 	for k, v := range poolsInfo {
 		s.poolsInfo[k] = v
 	}
+}
+
+func (s *BalancerLinearStrategy) SetEdgePools(edgePools map[EdgeKey][]common.Address) {
+	s.edgePools = edgePools
 }
 
 func (s *BalancerLinearStrategy) ProcessPossibleTx(t *PossibleTx) {
 	s.inPossibleTxsChan <- t
 }
 
-func (s *BalancerLinearStrategy) ProcessPermUpdates(us []*PairUpdate) {
+func (s *BalancerLinearStrategy) ProcessPermUpdates(us []*PoolUpdate) {
 	s.inPermUpdatesChan <- us
 }
 
-func (s *BalancerLinearStrategy) GetInterestedPairs() map[common.Address]struct{} {
-	return s.interestedPairs
+func (s *BalancerLinearStrategy) GetInterestedPools() map[common.Address]struct{} {
+	return s.interestedPools
 }
 
 func (s *BalancerLinearStrategy) AddSubStrategy(sub Strategy) {
@@ -71,49 +80,112 @@ func (s *BalancerLinearStrategy) AddSubStrategy(sub Strategy) {
 
 func (s *BalancerLinearStrategy) Start() {
 	// 	scores := s.makeScores()
-	// 	s.routeCache.PairToRouteIdxs = s.sortPairToRouteIdxMap(scores)
+	// 	s.routeCache.PoolToRouteIdxs = s.sortPoolToRouteIdxMap(scores)
 	// 	go s.runPermUpdater(scores)
 	// 	go s.runStrategy()
 }
 
 func (s *BalancerLinearStrategy) loadJson() {
-	log.Info("Loading pools")
-	poolCachePoolsFile, err := os.Open(s.cfg.PoolsFileName)
+	log.Info("Loading routes")
+	routeCacheRoutesFile, err := os.Open(s.cfg.RoutesFileName)
 	if err != nil {
-		log.Info("Error opening poolCachePools", "poolCachePoolsFileName", s.cfg.PoolsFileName, "err", err)
+		log.Info("Error opening routeCacheRoutes", "routeCacheRoutesFileName", s.cfg.RoutesFileName, "err", err)
 		return
 	}
-	defer poolCachePoolsFile.Close()
-	poolCachePoolsBytes, _ := ioutil.ReadAll(poolCachePoolsFile)
-	var poolCacheJson RouteCacheJson
-	json.Unmarshal(poolCachePoolsBytes, &(poolCacheJson.Routes))
-	log.Info("Loaded pools")
-
-	// routeCache := RouteCache{
-	// 	Routes:          make([][]*Leg, len(routeCacheJson.Routes)),
-	// 	PoolToRouteIdxs: make(map[PoolKey][]uint),
-	// }
-	// for i, routeJson := range routeCacheJson.Routes {
-	// 	route := make([]*Leg, len(routeJson))
-	// 	for x, leg := range routeJson {
-	// 		poolAddr := common.HexToAddress(leg.PoolAddr)
-	// 		s.interestedPools[poolAddr] = struct{}{}
-	// 		route[x] = &Leg{
-	// 			From:     common.HexToAddress(leg.From),
-	// 			To:       common.HexToAddress(leg.To),
-	// 			PoolAddr: poolAddr,
-	// 		}
-	// 	}
-	// 	routeCache.Routes[i] = route
-	// }
-	// for strKey, routeIdxs := range routeCacheJson.PoolToRouteIdxs {
-	// 	parts := strings.Split(strKey, "_")
-	// 	key := poolKeyFromStrs(parts[0], parts[1], parts[2])
-	// 	routeCache.PoolToRouteIdxs[key] = routeIdxs
-	// }
-	// log.Info("Processed route cache", "name", s.Name)
-	// s.routeCache = routeCache
+	defer routeCacheRoutesFile.Close()
+	routeCacheRoutesBytes, _ := ioutil.ReadAll(routeCacheRoutesFile)
+	var routeCacheJson RouteCacheJson
+	json.Unmarshal(routeCacheRoutesBytes, &(routeCacheJson.Routes))
+	log.Info("Loaded routes")
+	routeCachePoolToRouteIdxsFile, err := os.Open(s.cfg.PoolToRouteIdxsFileName)
+	if err != nil {
+		log.Info("Error opening routeCachePoolToRouteIdxs", "routeCachePoolToRouteIdxsFileName", s.cfg.PoolToRouteIdxsFileName, "err", err)
+		return
+	}
+	defer routeCachePoolToRouteIdxsFile.Close()
+	routeCachePoolToRouteIdxsBytes, _ := ioutil.ReadAll(routeCachePoolToRouteIdxsFile)
+	json.Unmarshal(routeCachePoolToRouteIdxsBytes, &(routeCacheJson.PoolToRouteIdxs))
+	log.Info("Loaded poolToRouteIdxs")
+	routeCache := RouteCache{
+		Routes:          make([][]*Leg, len(routeCacheJson.Routes)),
+		PoolToRouteIdxs: make(map[PoolKey][]uint),
+	}
+	for i, routeJson := range routeCacheJson.Routes {
+		route := make([]*Leg, len(routeJson))
+		for x, leg := range routeJson {
+			poolAddr := common.HexToAddress(leg.PoolAddr)
+			s.interestedPools[poolAddr] = struct{}{}
+			route[x] = &Leg{
+				From:         common.HexToAddress(leg.From),
+				To:           common.HexToAddress(leg.To),
+				PoolAddr:     poolAddr,
+				ExchangeType: leg.ExchangeType,
+			}
+		}
+		routeCache.Routes[i] = route
+	}
+	for strKey, routeIdxs := range routeCacheJson.PoolToRouteIdxs {
+		parts := strings.Split(strKey, "_")
+		key := poolKeyFromStrs(parts[0], parts[1], parts[2])
+		routeCache.PoolToRouteIdxs[key] = routeIdxs
+	}
+	log.Info("Processed route cache", "name", s.Name)
+	s.routeCache = routeCache
 }
+
+func (s *BalancerLinearStrategy) getAmountOutBalancer(
+	amountIn, balanceIn, balanceOut, weightIn, weightOut, feeNumerator *big.Int) *big.Int {
+	amountInf := BigIntToFloat(amountIn)
+	balanceInf := BigIntToFloat(balanceIn)
+	balanceOutf := BigIntToFloat(balanceOut)
+	weightInf := BigIntToFloat(weightIn)
+	weightOutf := BigIntToFloat(weightOut)
+	fee := BigIntToFloat(feeNumerator) / math.Pow(10, 6)
+	amountInf = amountInf * fee
+	base := balanceInf / (balanceInf + amountInf)
+	power := math.Pow(base, weightInf/weightOutf)
+	return FloatToBigInt(balanceOutf * (1 - power))
+}
+
+func (s *BalancerLinearStrategy) getRouteAmountOut(
+	route []*Leg, amountIn *big.Int, poolsInfoOverride map[common.Address]*PoolInfo) *big.Int {
+	var amountOut *big.Int
+	for _, leg := range route {
+		s.mu.RLock()
+		poolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, leg.PoolAddr)
+		s.mu.RUnlock()
+		var reserveFrom *big.Int
+		var reserveTo *big.Int
+		if bytes.Compare(poolInfo.Token0.Bytes(), leg.From.Bytes()) == 0 {
+			reserveFrom, reserveTo = poolInfo.Reserves[0], poolInfo.Reserves[1]
+		} else {
+			reserveFrom, reserveTo = poolInfo.Reserves[1], poolInfo.Reserves[0]
+		}
+		amountOut = getAmountOutUniswap(amountIn, reserveFrom, reserveTo, poolInfo.FeeNumerator)
+		amountIn = amountOut
+	}
+	return amountOut
+}
+
+// 	tenToSix := big.NewInt(int64(1e6))
+// 	one := big.NewInt(1)
+// 	amountIn = amountIn.Mul(amountIn, feeNumerator) // Add fee to amountIn
+// 	amountIn = amountIn.Div(amountIn, tenToSix)
+// 	exponent := new(big.Int).Div(weightIn, weightOut)
+// 	base := new(big.Int).Mul(balanceIn, amountIn)
+// 	if base.BitLen() == 0 {
+// 		log.Info("WARNING: getAmountOut returning 0", "balanceIn", balanceIn, "balanceOut", balanceOut, "amountIn", amountIn)
+// 		return big.NewInt(0)
+// 	}
+// 	base = base.Div(balanceIn, base)
+// 	base = base.Exp(base, exponent, nil)
+// 	if base.Cmp(one) == -1 {
+// 		base = base.Sub(one, base)
+// 	} else {
+// 		base = big.NewInt(0)
+// 	}
+// 	return base.Mul(balanceOut, base)
+// }
 
 // func (s *BalancerLinearStrategy) runPermUpdater(scores []uint64) {
 // 	for {
@@ -444,7 +516,7 @@ func (s *BalancerLinearStrategy) loadJson() {
 // }
 
 // func (s *BalancerLinearStrategy) spotPriceAfterSwapExactTokensForTokens(
-// 	amount *big.Int, poolPairData ) *big.Int {
+// 	amount *big.Int, poolPoolData ) *big.Int {
 // 	s.mu.RLock()
 // 	startPoolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, route[0].PoolAddr)
 // 	s.mu.RUnlock()
