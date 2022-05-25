@@ -12,7 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish4_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_stable_pool"
+	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_vault"
+	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_weighted_pool"
+	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/uniswap_pair_lite"
 	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/evmcore"
@@ -41,20 +44,35 @@ const (
 )
 
 var (
-	// fishAddr           = common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8")
-	fishAddr           = common.HexToAddress("0xBBFc9BD0a39C516182652276Da18eCA50b6bc5d5")
-	nullAddr           = common.HexToAddress("0x0000000000000000000000000000000000000000")
-	syncEventTopic     = []byte{0x1c, 0x41, 0x1e, 0x9a, 0x96, 0xe0, 0x71, 0x24, 0x1c, 0x2f, 0x21, 0xf7, 0x72, 0x6b, 0x17, 0xae, 0x89, 0xe3, 0xca, 0xb4, 0xc7, 0x8b, 0xe5, 0x0e, 0x06, 0x2b, 0x03, 0xa9, 0xff, 0xfb, 0xba, 0xd1}
-	transferEventTopic = []byte{0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, 0x69, 0xc2, 0xb0, 0x68, 0xfc, 0x37, 0x8d, 0xaa, 0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x16, 0x28, 0xf5, 0x5a, 0x4d, 0xf5, 0x23, 0xb3, 0xef}
-	poolGetReservesAbi = uniswap_pair_lite.GetReserves()
-	poolToken0Abi      = uniswap_pair_lite.Token0()
-	poolToken1Abi      = uniswap_pair_lite.Token1()
-	root               = "/home/ubuntu/dexter/carb/"
-	MaxGasPrice        = big.NewInt(5000e9)
-	accuracyAlpha      = 0.8
-	bravadoAlpha       = 0.75
-	gasAlpha           = 0.5
-	arbitrageurs       = map[common.Address]string{
+	// fishAddr = common.HexToAddress("0xd4dB252c5De305630e34957eD3931Ee5284582e7")
+	fishAddr                     = common.HexToAddress("0xa50B5c30537E000482A041cC2C5C62331739A3aC")
+	nullAddr                     = common.HexToAddress("0x0000000000000000000000000000000000000000")
+	bVaultAddr                   = common.HexToAddress("0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce")
+	syncEventTopic               = []byte{0x1c, 0x41, 0x1e, 0x9a, 0x96, 0xe0, 0x71, 0x24, 0x1c, 0x2f, 0x21, 0xf7, 0x72, 0x6b, 0x17, 0xae, 0x89, 0xe3, 0xca, 0xb4, 0xc7, 0x8b, 0xe5, 0x0e, 0x06, 0x2b, 0x03, 0xa9, 0xff, 0xfb, 0xba, 0xd1}
+	transferEventTopic           = []byte{0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, 0x69, 0xc2, 0xb0, 0x68, 0xfc, 0x37, 0x8d, 0xaa, 0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x16, 0x28, 0xf5, 0x5a, 0x4d, 0xf5, 0x23, 0xb3, 0xef}
+	swapEventTopic               = common.FromHex("0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b")
+	poolGetReservesAbi           = uniswap_pair_lite.GetReserves()
+	poolToken0Abi                = uniswap_pair_lite.Token0()
+	poolToken1Abi                = uniswap_pair_lite.Token1()
+	getSwapFeePercentageAbi      = balancer_v2_weighted_pool.GetSwapFeePercentage()
+	getAmplificationParameterAbi = balancer_v2_stable_pool.GetAmplificationParameter()
+	getNormalizedWeightsAbi      = balancer_v2_weighted_pool.GetNormalizedWeights()
+	root                         = "/home/ubuntu/dexter/carb/"
+	MaxGasPrice                  = big.NewInt(5000e9)
+	accuracyAlpha                = 0.8
+	bravadoAlpha                 = 0.75
+	gasAlpha                     = 0.5
+	defaultValidatorIds          = []idx.ValidatorID{
+		17,
+		28,
+		56,
+		57,
+		1,
+		50,
+		10,
+		55,
+	}
+	arbitrageurs = map[common.Address]string{
 		common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52"): "Mr Million",
 		common.HexToAddress("0x6C080c87e84e71C4c8364128dBE66f5e30a0e370"): "Starving Artist",
 		common.HexToAddress("0x244FAcabcf7a1026849B53295b1F7279a1bD597b"): "Topher Ford",
@@ -64,7 +82,7 @@ var (
 		common.HexToAddress("0xD8E1D3608D927d370afFE5EaaF6B050BDc11df6E"): "Daisy with a Reputation",
 		common.HexToAddress("0x3BCC05Bc23a6D3223C09F1724bE631c3A2Ff3a77"): "Flipper",
 		common.HexToAddress("0x708E6A5E3b0109830cEF2121519849EfB4d8375D"): "Wife Beater",
-		common.HexToAddress("0xB8A78253Fc10Dac192027c197759da3446357E74"): "Mister Baiter",
+		common.HexToAddress("0xB8A78253Fc10Dac192027c197759da3446357E74"): "Mister Baiter", // todo: Research this guy.
 		common.HexToAddress("0xcB00E3db4c4DCB7B07A2f9A89b6AaBac8E9c6B6D"): "Sea Boo",
 		common.HexToAddress("0x66Cc927Cb26068E31c6dF653535586B16B6c376b"): "Sixty Six Sisi",
 		common.HexToAddress("0x6db8d1131caae893e19dd684dcc134109c56aaaa"): "Six Decibel Swinger",
@@ -73,6 +91,10 @@ var (
 		common.HexToAddress("0xa0f26fe4a657b17b463eacb37de49102e3b5be75"): "Awful Albert",
 		common.HexToAddress("0xF501d66f609290D1E6759dFcFA88F869A82fDC97"): "Husky 501",
 		common.HexToAddress("0xe89ad2d3cc5df094175f2c29d22cfbab5d09e7b7"): "High roller",
+		common.HexToAddress("0xa775eBB05Aff8c46048e66FF3fc76A53c3801245"): "Creative accountant",
+		common.HexToAddress("0x4a634281D3C2aF3a21469f2Ba1ad47b59dA8b752"): "Old faithful",
+		common.HexToAddress("0x7536b89f556533200b063e112db947192335a981"): "Broke uni student",
+		common.HexToAddress("0x80850B0Cff30EBFDa6cC8cf3b200dD9477C25F34"): "Bob the amateur",
 	}
 	contracts = map[common.Address]string{
 		common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8"): "Fish3",
@@ -97,39 +119,41 @@ var (
 )
 
 type Dexter struct {
-	svc                *Service
-	inTxChan           chan *types.Transaction
-	inLogsChan         chan []*types.Log
-	inLogsSub          notify.Subscription
-	inBlockChan        chan evmcore.ChainHeadNotify
-	inBlockSub         notify.Subscription
-	inEpochChan        chan idx.Epoch
-	inEpochSub         notify.Subscription
-	inEventChan        chan *inter.EventPayload
-	inEventSub         notify.Subscription
-	lag                time.Duration
-	gunRefreshes       chan GunList
-	signer             types.Signer
-	guns               map[idx.ValidatorID][]accounts.Wallet // Deprecated
-	gunList            GunList
-	watchedTxs         chan *TxSub
-	ignoreTxs          map[common.Hash]struct{}
-	interestedPools    map[common.Address]struct{}
-	clearIgnoreTxChan  chan common.Hash
-	eventRaceChan      chan *RaceEntry
-	txRaceChan         chan *RaceEntry
-	railgunChan        chan *dexter.RailgunPacket
-	txLagRequestChan   chan common.Hash
-	strategies         []dexter.Strategy
-	strategyBravado    []float64
-	firedTxChan        chan *FiredTx
-	tokenWhitelistChan chan common.Address
-	poolsInfo          map[common.Address]*dexter.PoolInfo
-	accuracy           float64
-	gasFloors          map[idx.ValidatorID]int64
-	globalGasFloor     int64
-	numPending         int
-	mu                 sync.RWMutex
+	svc               *Service
+	inTxChan          chan *types.Transaction
+	inLogsChan        chan []*types.Log
+	inLogsSub         notify.Subscription
+	inBlockChan       chan evmcore.ChainHeadNotify
+	inBlockSub        notify.Subscription
+	inEpochChan       chan idx.Epoch
+	inEpochSub        notify.Subscription
+	inEventChan       chan *inter.EventPayload
+	inEventSub        notify.Subscription
+	lag               time.Duration
+	gunRefreshes      chan GunList
+	signer            types.Signer
+	guns              map[idx.ValidatorID][]accounts.Wallet // Deprecated
+	gunList           GunList
+	watchedTxs        chan *TxSub
+	ignoreTxs         map[common.Hash]struct{}
+	interestedPairs   map[common.Address]dexter.PoolType
+	interestedPools   map[dexter.BalPoolId]dexter.PoolType
+	clearIgnoreTxChan chan common.Hash
+	eventRaceChan     chan *RaceEntry
+	txRaceChan        chan *RaceEntry
+	railgunChan       chan *dexter.RailgunPacket
+	txLagRequestChan  chan common.Hash
+	strategies        []dexter.Strategy
+	strategyBravado   []float64
+	firedTxChan       chan *FiredTx
+	// tokenWhitelistChan chan common.Address
+	poolsInfo      map[common.Address]*dexter.PoolInfo
+	accuracy       float64
+	gasFloors      map[idx.ValidatorID]int64
+	globalGasFloor int64
+	globalGasPrice int64
+	numPending     int
+	mu             sync.RWMutex
 }
 
 type RaceEntry struct {
@@ -164,27 +188,28 @@ type PoolInfoJson struct {
 
 func NewDexter(svc *Service) *Dexter {
 	d := &Dexter{
-		svc:                svc,
-		inTxChan:           make(chan *types.Transaction, 4096),
-		inLogsChan:         make(chan []*types.Log, 4096),
-		inBlockChan:        make(chan evmcore.ChainHeadNotify, 4096),
-		inEpochChan:        make(chan idx.Epoch, 4096),
-		inEventChan:        make(chan *inter.EventPayload, 4096),
-		interestedPools:    make(map[common.Address]struct{}),
-		lag:                time.Minute * 60,
-		signer:             gsignercache.Wrap(types.LatestSignerForChainID(svc.store.GetRules().EvmChainConfig().ChainID)),
-		gunRefreshes:       make(chan GunList),
-		watchedTxs:         make(chan *TxSub),
-		firedTxChan:        make(chan *FiredTx),
-		ignoreTxs:          make(map[common.Hash]struct{}),
-		clearIgnoreTxChan:  make(chan common.Hash, 16),
-		eventRaceChan:      make(chan *RaceEntry, 8192),
-		txRaceChan:         make(chan *RaceEntry, 8192),
-		railgunChan:        make(chan *dexter.RailgunPacket, 8),
-		txLagRequestChan:   make(chan common.Hash, 16),
-		tokenWhitelistChan: make(chan common.Address, 128),
-		poolsInfo:          make(map[common.Address]*dexter.PoolInfo),
-		gasFloors:          make(map[idx.ValidatorID]int64),
+		svc:               svc,
+		inTxChan:          make(chan *types.Transaction, 4096),
+		inLogsChan:        make(chan []*types.Log, 4096),
+		inBlockChan:       make(chan evmcore.ChainHeadNotify, 4096),
+		inEpochChan:       make(chan idx.Epoch, 4096),
+		inEventChan:       make(chan *inter.EventPayload, 4096),
+		interestedPairs:   make(map[common.Address]dexter.PoolType),
+		interestedPools:   make(map[dexter.BalPoolId]dexter.PoolType),
+		lag:               time.Minute * 60,
+		signer:            gsignercache.Wrap(types.LatestSignerForChainID(svc.store.GetRules().EvmChainConfig().ChainID)),
+		gunRefreshes:      make(chan GunList),
+		watchedTxs:        make(chan *TxSub),
+		firedTxChan:       make(chan *FiredTx),
+		ignoreTxs:         make(map[common.Hash]struct{}),
+		clearIgnoreTxChan: make(chan common.Hash, 16),
+		eventRaceChan:     make(chan *RaceEntry, 8192),
+		txRaceChan:        make(chan *RaceEntry, 8192),
+		railgunChan:       make(chan *dexter.RailgunPacket, 8),
+		txLagRequestChan:  make(chan common.Hash, 16),
+		// tokenWhitelistChan: make(chan common.Address, 128),
+		poolsInfo: make(map[common.Address]*dexter.PoolInfo),
+		gasFloors: make(map[idx.ValidatorID]int64),
 	}
 	d.strategies = []dexter.Strategy{
 
@@ -193,26 +218,17 @@ func NewDexter(svc *Service) *Dexter {
 			PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len2-4.json",
 		}),
 
-		// dexter.NewLinearStrategy("Linear 4", 1, d.railgunChan, dexter.LinearStrategyConfig{
-		// 	RoutesFileName:          root + "route_cache_routes_len4.json",
-		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len4.json",
-		// }),
-
-		// dexter.NewLinearStrategy("Linear", 0, d.railgunChan, dexter.LinearStrategyConfig{
-		// 	RoutesFileName:          root + "route_cache_routes_10ftm.json",
-		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_10ftm.json",
-		// }),
-
 		dexter.NewLinearStrategy("Linear sans wftm", 1, d.railgunChan, dexter.LinearStrategyConfig{
-			RoutesFileName:          root + "route_cache_routes_no_wftm_2-4.json",
-			PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_no_wftm_2-4.json",
+			RoutesFileName:          root + "route_cache_routes_no_wftm_2-5.json",
+			PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_no_wftm_2-5.json",
 		}),
 
-		// dexter.NewBalancerLinearStrategy("Balancer Linear", 1, d.railgunChan, dexter.LinearStrategyConfig{
-		// 	RoutesFileName:          root + "balancer_cache_routes_len2.json",
-		// 	PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2.json",
-		// }),
+		dexter.NewBalancerLinearStrategy("Balancer Linear", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			RoutesFileName:          root + "balancer_cache_routes_len2-4.json",
+			PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2-4.json",
+		}),
 
+		//
 	}
 	d.strategyBravado = make([]float64, len(d.strategies))
 	for i := 0; i < len(d.strategyBravado); i++ {
@@ -227,31 +243,80 @@ func NewDexter(svc *Service) *Dexter {
 	d.loadJson()
 
 	for _, s := range d.strategies {
-		for poolAddr, _ := range s.GetInterestedPools() {
-			d.interestedPools[poolAddr] = struct{}{}
+		pairs, pools := s.GetInterestedPools()
+		for poolAddr, t := range pairs {
+			d.interestedPairs[poolAddr] = t
+		}
+		for poolAddr, t := range pools {
+			d.interestedPools[poolAddr] = t
 		}
 	}
 
 	edgePools := make(map[dexter.EdgeKey][]common.Address)
-	for poolAddr, _ := range d.interestedPools {
+	for poolAddr, t := range d.interestedPairs {
 		poolInfo, ok := d.poolsInfo[poolAddr]
 		if !ok {
 			log.Warn("Could not find PoolInfo for interested pool", "addr", poolAddr)
 			continue
 		}
-		reserve0, reserve1 := d.getReserves(&poolAddr)
-		token0, token1 := d.getPoolTokens(&poolAddr)
-		d.poolsInfo[poolAddr] = &dexter.PoolInfo{
-			Reserves:     []*big.Int{reserve0, reserve1},
-			Tokens:       []common.Address{token0, token1},
-			FeeNumerator: poolInfo.FeeNumerator,
-		}
-		edgeKey := dexter.MakeEdgeKey(token0, token1)
-		if pools, ok := edgePools[edgeKey]; ok {
-			edgePools[edgeKey] = append(pools, poolAddr)
+		if t == dexter.UniswapV2Pair {
+			reserve0, reserve1 := d.getReserves(&poolAddr)
+			token0, token1 := d.getUniswapPairTokens(&poolAddr)
+			d.poolsInfo[poolAddr] = &dexter.PoolInfo{
+				Reserves:     map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
+				Tokens:       []common.Address{token0, token1},
+				FeeNumerator: poolInfo.FeeNumerator,
+				LastUpdate:   time.Now(),
+			}
+			edgeKey := dexter.MakeEdgeKey(token0, token1)
+			if pools, ok := edgePools[edgeKey]; ok {
+				edgePools[edgeKey] = append(pools, poolAddr)
+			} else {
+				edgePools[edgeKey] = []common.Address{poolAddr}
+			}
 		} else {
-			edgePools[edgeKey] = []common.Address{poolAddr}
+			log.Error("Interested in pair that is not uniswap pair?!", "addr", poolAddr.Hex())
 		}
+	}
+
+	for poolId, t := range d.interestedPools {
+		var poolAddr common.Address
+		copy(poolAddr[:], poolId[:20])
+		_, ok := d.poolsInfo[poolAddr]
+		if ok {
+			log.Error("Duplicate balancer pool addr", "addr", poolAddr, "id", poolId)
+			continue
+		}
+		fee := d.getSwapFeePercentage(&poolAddr)
+		poolInfo := dexter.PoolInfo{
+			Fee:        fee,
+			Reserves:   make(map[common.Address]*big.Int),
+			Weights:    make(map[common.Address]*big.Int),
+			LastUpdate: time.Now(),
+		}
+		if t == dexter.BalancerWeightedPool {
+			d.poolsInfo[poolAddr] = &poolInfo
+			poolTokens := d.getPoolTokens(poolId)
+			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
+			poolInfo.Tokens = poolTokens.Tokens
+			weights := d.getNormalizedWeights(&poolAddr)
+			for i, bal := range poolTokens.Balances {
+				poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+				poolInfo.Weights[poolTokens.Tokens[i]] = weights[i]
+			}
+			// log.Info("PoolInfo", "id", poolId, "info", poolInfo)
+		} else if t == dexter.BalancerStablePool {
+			d.poolsInfo[poolAddr] = &poolInfo
+			poolTokens := d.getPoolTokens(poolId)
+			poolInfo.Tokens = poolTokens.Tokens
+			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
+			amp := d.getAmplificationParameter(&poolAddr)
+			poolInfo.AmplificationParam = amp
+			for i, bal := range poolTokens.Balances {
+				poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+			}
+		}
+		d.poolsInfo[poolAddr] = &poolInfo
 	}
 
 	for _, s := range d.strategies {
@@ -265,7 +330,6 @@ func NewDexter(svc *Service) *Dexter {
 	go d.watchEvents()
 	go d.eventRace()
 	go d.runRailgun()
-	go d.runTokenWhitelister()
 	svc.handler.RaceEvents(d.eventRaceChan)
 	svc.handler.RaceTxs(d.txRaceChan)
 	return d
@@ -393,7 +457,7 @@ func (d *Dexter) eventRace() {
 				}
 			}
 			sortedPeers = append(sortedPeers, losers...)
-			log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
+			// log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
 			// d.svc.handler.peers.Cull(losers)
 			d.svc.handler.peers.SetSortedPeers(sortedPeers)
 			d.svc.handler.peers.SetSortedTxPeers(sortedTxPeers)
@@ -528,19 +592,21 @@ func (d *Dexter) processIncomingLogs() {
 	methodUsers := make(map[[4]byte]*common.Address)
 	numUpdates := 0
 	for {
+		// FIXME: Convert this to a map[common.Address]PoolUpdate to dedupe.
 		var updates []*dexter.PoolUpdate
 		select {
 		case logs := <-d.inLogsChan:
 			for _, l := range logs {
 				poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
 				if poolAddr != nil {
-					_, ok := d.interestedPools[*poolAddr]
+					_, ok := d.interestedPairs[*poolAddr]
 					if !ok {
 						continue
 					}
+					token0, token1 := d.getUniswapPairTokens(poolAddr)
 					updates = append(updates, &dexter.PoolUpdate{
 						Addr:     *poolAddr,
-						Reserves: []*big.Int{reserve0, reserve1},
+						Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 					})
 					block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
 					if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
@@ -559,19 +625,34 @@ func (d *Dexter) processIncomingLogs() {
 							methodUsers[method] = tx.To()
 						}
 					}
-				} else if len(l.Topics) >= 1 && bytes.Compare(l.Topics[0].Bytes(), transferEventTopic) == 0 {
-					// log.Info("Transfer TX", "addr", l.Address)
-					block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
-					if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
-						continue
+					// } else if len(l.Topics) >= 1 && bytes.Compare(l.Topics[0].Bytes(), transferEventTopic) == 0 {
+					// 	// log.Info("Transfer TX", "addr", l.Address)
+					// 	block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
+					// 	if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
+					// 		continue
+					// 	}
+					// 	tx := block.Transactions[l.TxIndex]
+					// 	if tx.To() == nil {
+					// 		continue
+					// 	}
+					// 	if _, ok := arbitrageurs[*tx.To()]; ok {
+					// 		d.tokenWhitelistChan <- l.Address
+					// 	}
+				} else if len(l.Topics) >= 2 && bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 {
+					var poolId dexter.BalPoolId
+					copy(poolId[:], l.Topics[1].Bytes())
+					var poolAddr common.Address = common.BytesToAddress(poolId[:20])
+					// log.Info("Balancer swap event", "l", l, "poolId", poolId)
+					pool := d.getPoolTokens(poolId)
+					// log.Info("Balancer updated pool tokens", "pool", pool, "addr", poolAddr)
+					u := &dexter.PoolUpdate{
+						Addr:     poolAddr,
+						Reserves: make(map[common.Address]*big.Int),
 					}
-					tx := block.Transactions[l.TxIndex]
-					if tx.To() == nil {
-						continue
+					for i, tokAddr := range pool.Tokens {
+						u.Reserves[tokAddr] = pool.Balances[i]
 					}
-					if _, ok := arbitrageurs[*tx.To()]; ok {
-						d.tokenWhitelistChan <- l.Address
-					}
+					updates = append(updates, u)
 				}
 			}
 			if len(updates) > 0 {
@@ -631,6 +712,7 @@ func (d *Dexter) processIncomingTxs() {
 			}
 			for strategyID, bravado := range d.strategyBravado {
 				d.strategyBravado[strategyID] = math.Min(1.0, bravado+0.005)
+				d.strategies[strategyID].SetGasPrice(d.globalGasPrice)
 			}
 			receipts, err := d.svc.EthAPI.GetReceipts(context.TODO(), n.Block.Hash)
 			if err != nil {
@@ -665,10 +747,11 @@ func (d *Dexter) processIncomingTxs() {
 }
 
 func (d *Dexter) processTx(tx *types.Transaction) {
+	start := time.Now()
 	from, _ := types.Sender(d.signer, tx)
 	validators, epoch := d.svc.store.GetEpochValidators() // TODO: Move this up?
 	validatorIDs := d.predictValidators(from, tx.Nonce(), validators, epoch, numValidators)
-	d.watchedTxs <- &TxSub{Hash: tx.Hash(), PredictedValidators: validatorIDs, Print: false, StartTime: time.Now()}
+	d.watchedTxs <- &TxSub{Hash: tx.Hash(), PredictedValidators: validatorIDs, Print: false, StartTime: start}
 	if tx.GasPrice().Cmp(MaxGasPrice) == 1 {
 		return
 	}
@@ -694,25 +777,45 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		evmStateReader)
 	txs := types.Transactions{tx}
 	evmBlock := d.evmBlockWith(txs, &bs, evmStateReader)
-
 	var gasUsed uint64
 	ptx := &dexter.PossibleTx{
 		Tx:           tx,
 		ValidatorIDs: validatorIDs,
+		StartTime:    start,
 	}
+	var updatedPools []dexter.BalPoolId
 	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
 		poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
 		if poolAddr != nil {
-			if _, ok := d.interestedPools[*poolAddr]; ok {
+			if _, ok := d.interestedPairs[*poolAddr]; ok {
+				token0, token1 := d.getUniswapPairTokens(poolAddr)
 				ptx.Updates = append(ptx.Updates, dexter.PoolUpdate{
 					Addr:     *poolAddr,
-					Reserves: []*big.Int{reserve0, reserve1},
+					Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 				})
 			}
+		} else if len(l.Topics) >= 2 && bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 {
+			var poolId dexter.BalPoolId
+			copy(poolId[:], l.Topics[1].Bytes())
+			updatedPools = append(updatedPools, poolId)
+			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
 		}
 	})
-	if len(ptx.Updates) == 0 {
+	if len(ptx.Updates) == 0 && len(updatedPools) == 0 {
 		return
+	}
+	for _, poolId := range updatedPools {
+		evm := d.getEvm(statedb, evmStateReader, bs)
+		var poolAddr common.Address = common.BytesToAddress(poolId[:20])
+		pool := d.getPoolTokensFromEvm(poolId, evm)
+		u := dexter.PoolUpdate{
+			Addr:     poolAddr,
+			Reserves: make(map[common.Address]*big.Int),
+		}
+		for i, tokAddr := range pool.Tokens {
+			u.Reserves[tokAddr] = pool.Balances[i]
+		}
+		ptx.Updates = append(ptx.Updates, u)
 	}
 	for _, s := range d.strategies {
 		s.ProcessPossibleTx(ptx)
@@ -738,23 +841,41 @@ func (d *Dexter) runRailgun() {
 		case guns := <-d.gunRefreshes:
 			d.gunList = guns
 		case p := <-d.railgunChan:
+			log.Info("Received railgun request", "strategy", p.StrategyID)
+			deadline := time.After(5 * time.Millisecond)
+		loop:
+			for {
+				select {
+				case p2 := <-d.railgunChan:
+					if p2.Response.NetProfit.Cmp(p.Response.NetProfit) > 0 {
+						log.Info("Overriding plan with more profitable plan", "strategy1", p.StrategyID, "strategy2", p2.StrategyID, "profit1", p.Response.NetProfit, "profit2", p2.Response.NetProfit)
+						p = p2
+					}
+				case <-deadline:
+					break loop
+				}
+			}
 			bravado := d.strategyBravado[p.StrategyID]
-			probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
+			probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado*0.5)))
 			failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
-			probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(100-d.accuracy)))
-			// log.Info("Win/lose costs", "win", probAdjustedPayoff, "lose", probAdjustedFailCost, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", p.Response.NetProfit, "unadjusted lose", failCost)
+			probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(1e6)))
 			if probAdjustedPayoff.Cmp(probAdjustedFailCost) == -1 {
-				log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado)
+				// log.Info("Win/lose costs", "win", probAdjustedPayoff, "lose", probAdjustedFailCost, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", p.Response.NetProfit, "unadjusted lose", failCost)
+				// log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado)
 				continue
 			}
-			gunIdx := d.gunList.Search(p.ValidatorIDs)
+			validatorIDs := p.ValidatorIDs
+			if len(validatorIDs) == 0 {
+				validatorIDs = defaultValidatorIds
+			}
+			gunIdx := d.gunList.Search(validatorIDs)
 			if gunIdx < 0 {
 				log.Warn("Gun list not initialized")
 				continue
 			}
 			gun := d.gunList[gunIdx] // TODO: Prevent gun reuse with multiple strategies
-			if gun.ValidatorIDs[0] != p.ValidatorIDs[0] {
-				log.Warn("Could not find validator", "validator", p.ValidatorIDs[0])
+			if gun.ValidatorIDs[0] != validatorIDs[0] {
+				log.Warn("Could not find validator", "validator", validatorIDs[0])
 				continue
 			}
 			d.gunList = d.gunList.Del(gunIdx)
@@ -763,42 +884,50 @@ func (d *Dexter) runRailgun() {
 			nonce := d.svc.txpool.Nonce(account.Address)
 			var fishCall []byte
 			if p.Type == dexter.SwapSinglePath {
-				fishCall = fish4_lite.SwapLinear(big.NewInt(0), p.Response.MinProfit, p.Response.Path, fishAddr)
+				fishCall = fish5_lite.SwapLinear(p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr)
+				// fishCall = fish4_lite.SwapLinear(big.NewInt(0), p.Response.MinProfit, p.Response.Path, fishAddr)
 			} else {
 				log.Error("Unsupported call type", "type", p.Type)
 				continue
 			}
-			fishTx := types.NewTransaction(nonce, fishAddr, common.Big0, 460000, p.Target.GasPrice(), fishCall)
+			fishTx := types.NewTransaction(nonce, fishAddr, common.Big0, 850000, p.Response.GasPrice, fishCall)
 			signedTx, err := wallet.SignTx(account, fishTx, d.svc.store.GetRules().EvmChainConfig().ChainID)
 			if err != nil {
 				log.Error("Could not sign tx", "err", err)
 				return
 			}
 			// TODO: Here is a fine spot to write onto txLagRequestChan
-			log.Info("FIRING GUN pew pew", "addr", account.Address, "targetTo", p.Target.To(),
-				"target", p.Target.Hash().Hex(), "gas", p.Target.GasPrice(), "size", p.Target.Size())
+			var label string
+			if p.Target != nil {
+				label = p.Target.Hash().Hex()
+				d.ignoreTxs[p.Target.Hash()] = struct{}{}
+			} else {
+				label = "block state"
+			}
+			log.Info("FIRING GUN pew pew", "lag", utils.PrettyDuration(time.Now().Sub(p.StartTime)), "hash", signedTx.Hash().Hex(), "strategy", p.StrategyID, "gas", p.Response.GasPrice)
 			// log.Info("Fired tx", "url", "https://ftmscan.com/tx/"+signedTx.Hash().Hex())
-			d.ignoreTxs[p.Target.Hash()] = struct{}{}
-			go d.fireGun(wallet, signedTx, p, gun.ValidatorIDs)
+			go d.fireGun(wallet, signedTx, p, gun.ValidatorIDs, label)
 		}
 	}
 }
 
-func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx *types.Transaction, p *dexter.RailgunPacket, gunValidatorIDs []idx.ValidatorID) {
+func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx *types.Transaction, p *dexter.RailgunPacket, gunValidatorIDs []idx.ValidatorID, label string) {
 	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target})
-	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
-	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target, signedTx})
+	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
+	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target, signedTx})
 	d.svc.txpool.AddLocal(signedTx)
-	d.watchedTxs <- &TxSub{
-		Hash:                p.Target.Hash(),
-		Label:               "target",
-		PredictedValidators: p.ValidatorIDs,
-		Print:               true,
-		StartTime:           time.Now(),
+	if p.Target != nil {
+		d.watchedTxs <- &TxSub{
+			Hash:                p.Target.Hash(),
+			Label:               "target",
+			PredictedValidators: p.ValidatorIDs,
+			Print:               true,
+			StartTime:           time.Now(),
+		}
 	}
 	d.watchedTxs <- &TxSub{
 		Hash:                signedTx.Hash(),
-		Label:               p.Target.Hash().Hex(),
+		Label:               label,
 		PredictedValidators: gunValidatorIDs,
 		TargetValidators:    p.ValidatorIDs,
 		Print:               true,
@@ -819,22 +948,25 @@ func (d *Dexter) watchEvents() {
 		select {
 		case e := <-d.inEventChan:
 			interested := false
+			interestedGas := make(map[int64]struct{})
 			txLabels := make(map[common.Hash]string)
 			var lowestGas int64 = 0
+			var highestGas int64 = 0
 			for _, tx := range e.Txs() {
+				if highestGas == 0 {
+					highestGas = tx.GasPrice().Int64()
+				}
 				lowestGas = tx.GasPrice().Int64()
 				if sub, ok := watchedTxMap[tx.Hash()]; ok {
-					var msg string
 					if e.Locator().Creator == sub.PredictedValidators[0] {
-						d.accuracy = d.accuracy*accuracyAlpha + 100.0*(1-accuracyAlpha)
-						msg = "Correct validator prediction"
+						d.accuracy = d.accuracy*accuracyAlpha + 1e6*(1-accuracyAlpha)
 					} else {
 						d.accuracy = d.accuracy * accuracyAlpha
-						msg = "Wrong validator prediction"
 					}
 					if sub.Print {
 						interested = true
-						log.Info(msg, "id", e.ID(), "lamport", e.Locator().Lamport, "creator", e.Locator().Creator, "predicted", sub.PredictedValidators, "target", sub.TargetValidators, "lag", utils.PrettyDuration(time.Now().Sub(sub.StartTime)), "tx", tx.Hash().Hex(), "label", sub.Label)
+						interestedGas[tx.GasPrice().Int64()] = struct{}{}
+						// log.Info(msg, "id", e.ID(), "lamport", e.Locator().Lamport, "creator", e.Locator().Creator, "predicted", sub.PredictedValidators, "target", sub.TargetValidators, "lag", utils.PrettyDuration(time.Now().Sub(sub.StartTime)), "tx", tx.Hash().Hex(), "label", sub.Label)
 						if sub.Label == "target" {
 							txLabels[tx.Hash()] = "TARGET"
 						} else {
@@ -847,6 +979,9 @@ func (d *Dexter) watchEvents() {
 			}
 			if interested {
 				for _, tx := range e.Txs() {
+					if _, ok := interestedGas[tx.GasPrice().Int64()]; !ok {
+						continue
+					}
 					var txLabel string
 					if label, ok := txLabels[tx.Hash()]; ok {
 						txLabel = label
@@ -867,6 +1002,8 @@ func (d *Dexter) watchEvents() {
 				prevGasFloor := d.gasFloors[e.Locator().Creator]
 				d.gasFloors[e.Locator().Creator] = (prevGasFloor*gasAlpha1 + lowestGas*gasAlpha2) / 100
 				d.globalGasFloor = (d.globalGasFloor*gasAlpha1 + lowestGas*gasAlpha2) / 100
+				gasPrice := (2*highestGas + lowestGas) / 3
+				d.globalGasPrice = (d.globalGasPrice*gasAlpha1 + gasPrice*gasAlpha2) / 100
 			}
 		case w := <-d.watchedTxs:
 			watchedTxMap[w.Hash] = w
@@ -891,7 +1028,7 @@ func (d *Dexter) getReserves(addr *common.Address) (*big.Int, *big.Int) {
 	return reserve0, reserve1
 }
 
-func (d *Dexter) getPoolTokens(addr *common.Address) (common.Address, common.Address) {
+func (d *Dexter) getUniswapPairTokens(addr *common.Address) (common.Address, common.Address) {
 	evm := d.getReadOnlyEvm()
 	msg0 := d.readOnlyMessage(addr, poolToken0Abi)
 	gp0 := new(evmcore.GasPool).AddGas(math.MaxUint64)
@@ -912,6 +1049,68 @@ func (d *Dexter) getPoolTokens(addr *common.Address) (common.Address, common.Add
 	return token0, token1
 }
 
+func (d *Dexter) getSwapFeePercentage(addr *common.Address) *big.Int {
+	evm := d.getReadOnlyEvm()
+	msg := d.readOnlyMessage(addr, getSwapFeePercentageAbi)
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getSwapFeePercentage error", "err", err)
+		return nil
+	}
+	fee := new(big.Int).SetBytes(result.ReturnData[:32])
+	return fee
+}
+
+func (d *Dexter) getAmplificationParameter(addr *common.Address) *big.Int {
+	evm := d.getReadOnlyEvm()
+	msg := d.readOnlyMessage(addr, getAmplificationParameterAbi)
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getAmplificationParameter error", "err", err)
+		return nil
+	}
+	amp := new(big.Int).SetBytes(result.ReturnData[:32])
+	return amp
+}
+
+func (d *Dexter) getNormalizedWeights(addr *common.Address) []*big.Int {
+	evm := d.getReadOnlyEvm()
+	msg := d.readOnlyMessage(addr, getNormalizedWeightsAbi)
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getNormalizedWeights error", "err", err)
+		return nil
+	}
+	return balancer_v2_weighted_pool.UnpackGetNormalizedWeights(result.ReturnData)
+}
+
+func (d *Dexter) getPoolTokens(poolId dexter.BalPoolId) struct {
+	Tokens          []common.Address
+	Balances        []*big.Int
+	LastChangeBlock *big.Int
+} {
+	evm := d.getReadOnlyEvm()
+	return d.getPoolTokensFromEvm(poolId, evm)
+}
+
+func (d *Dexter) getPoolTokensFromEvm(poolId dexter.BalPoolId, evm *vm.EVM) struct {
+	Tokens          []common.Address
+	Balances        []*big.Int
+	LastChangeBlock *big.Int
+} {
+	msg := d.readOnlyMessage(&bVaultAddr, balancer_v2_vault.GetPoolTokens(poolId))
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getPoolTokens error", "err", err)
+	}
+	// log.Info("getPoolTokens", "addr", bVaultAddr, "poolId", poolId, "result", result.ReturnData)
+	return balancer_v2_vault.UnpackGetPoolTokens(result.ReturnData)
+}
+
 func (d *Dexter) readOnlyMessage(toAddr *common.Address, data []byte) types.Message {
 	var accessList types.AccessList
 	return types.NewMessage(nullAddr, toAddr, 0, new(big.Int), math.MaxUint64, new(big.Int), new(big.Int), new(big.Int), data, accessList, true)
@@ -928,6 +1127,10 @@ func (d *Dexter) getReadOnlyEvm() *vm.EVM {
 		log.Info("Could not make StateDB", "err", err)
 		return nil
 	}
+	return d.getEvm(statedb, evmStateReader, bs)
+}
+
+func (d *Dexter) getEvm(statedb *state.StateDB, evmStateReader *EvmStateReader, bs iblockproc.BlockState) *vm.EVM {
 	vmConfig := &opera.DefaultVMConfig
 	txContext := vm.TxContext{
 		Origin:   nullAddr,
@@ -961,32 +1164,32 @@ func (d *Dexter) evmBlockWith(txs types.Transactions, bs *iblockproc.BlockState,
 	return evmcore.NewEvmBlock(d.evmHeader(bs, reader), txs)
 }
 
-func (d *Dexter) runTokenWhitelister() {
-	whitelist := make(map[common.Address]int)
-	for i := 0; ; i++ {
-		addr := <-d.tokenWhitelistChan
-		if cnt, ok := whitelist[addr]; ok {
-			whitelist[addr] = cnt + 1
-		} else {
-			whitelist[addr] = cnt + 1
-		}
-		if i%1000 == 0 {
-			whitelistJson := make(map[string]int)
-			for addr, cnt := range whitelist {
-				whitelistJson[addr.Hex()] = cnt
-			}
-			log.Info("Dumping token whitelist", "len1", len(whitelist), "len2", len(whitelistJson))
-			file, err := os.OpenFile(root+"/data/arbitrageur_token_whitelist.json", os.O_CREATE|os.O_WRONLY, os.ModePerm)
-			if err != nil {
-				log.Error("Could not open arbitrageur whitelist file", "err", err)
-				continue
-			}
-			encoder := json.NewEncoder(file)
-			err = encoder.Encode(whitelistJson)
-			if err != nil {
-				log.Error("JSON encoding error", "err", err)
-			}
-			file.Close()
-		}
-	}
-}
+// func (d *Dexter) runTokenWhitelister() {
+// 	whitelist := make(map[common.Address]int)
+// 	for i := 0; ; i++ {
+// 		addr := <-d.tokenWhitelistChan
+// 		if cnt, ok := whitelist[addr]; ok {
+// 			whitelist[addr] = cnt + 1
+// 		} else {
+// 			whitelist[addr] = cnt + 1
+// 		}
+// 		if i%1000 == 0 {
+// 			whitelistJson := make(map[string]int)
+// 			for addr, cnt := range whitelist {
+// 				whitelistJson[addr.Hex()] = cnt
+// 			}
+// 			log.Info("Dumping token whitelist", "len1", len(whitelist), "len2", len(whitelistJson))
+// 			file, err := os.OpenFile(root+"/data/arbitrageur_token_whitelist.json", os.O_CREATE|os.O_WRONLY, os.ModePerm)
+// 			if err != nil {
+// 				log.Error("Could not open arbitrageur whitelist file", "err", err)
+// 				continue
+// 			}
+// 			encoder := json.NewEncoder(file)
+// 			err = encoder.Encode(whitelistJson)
+// 			if err != nil {
+// 				log.Error("JSON encoding error", "err", err)
+// 			}
+// 			file.Close()
+// 		}
+// 	}
+// }

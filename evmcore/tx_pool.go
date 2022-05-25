@@ -153,10 +153,13 @@ var (
 		[]byte{126, 27, 149, 7},
 		[]byte{127, 243, 106, 181}, // []byte{0x7f, 0xf3, 0x6a, 0xb5},
 		[]byte{136, 3, 219, 238},   // []byte{0x88, 0x03, 0xdb, 0xee},
+		[]byte{139, 219, 57, 19},   // BalancerV2
 		[]byte{14, 92, 1, 30},
+		[]byte{148, 91, 206, 201}, // BalancerV2 swap
 		[]byte{152, 208, 241, 112},
 		[]byte{162, 140, 54, 27},  // beefOut(address beefyVault, uint256 withdrawAmount)
 		[]byte{169, 78, 120, 239}, // AugustusSwapper
+		[]byte{185, 92, 172, 40},  // BalancerV2
 		[]byte{24, 203, 175, 229}, // []byte{0x18, 0xcb, 0xaf, 0xe5},
 		[]byte{202, 198, 55, 200},
 		[]byte{209, 208, 255, 73},
@@ -181,6 +184,7 @@ var (
 		[]byte{70, 198, 123, 109}, // AugustusSwapper
 		[]byte{74, 37, 217, 74},   // []byte{0x4a, 0x25, 0xd9, 0x4a},
 		[]byte{81, 201, 207, 145}, // beefOutAndSwap(address beefyVault, uint256 withdrawAmount, address desiredToken, uint256 desiredTokenOutMin)
+		[]byte{82, 187, 190, 41},  // BalancerV2
 		[]byte{84, 227, 243, 27},  // AugustusSwapper
 	}
 	mrMillion = common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52")

@@ -1,5 +1,6 @@
 package fish4_lite
 
+// abigen --pkg fish4 --abi=Fish4Abi.json
 import (
 	"math/big"
 	"strings"

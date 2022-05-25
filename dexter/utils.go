@@ -3,6 +3,9 @@ package dexter
 import "math/big"
 
 func BigIntToFloat(x *big.Int) float64 {
+	if x == nil {
+		return 0
+	}
 	y, _ := new(big.Float).SetInt(x).Float64()
 	return y
 }

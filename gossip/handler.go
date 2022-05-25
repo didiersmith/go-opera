@@ -1494,7 +1494,7 @@ func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
 	for _, tx := range txs {
 		totalSize += tx.Size()
 	}
-	log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
+	// log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
 	for _, peer := range peers {
 		peer.AsyncSendTransactions(txs, peer.fastQueue)
 	}

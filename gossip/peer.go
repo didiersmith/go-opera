@@ -129,7 +129,6 @@ func (p *peer) broadcast(queue, fastQueue chan broadcastItem) {
 		select {
 		case item := <-fastQueue:
 			_ = p2p.Send(p.rw, item.Code, item.Raw)
-			p.queuedDataSemaphore.Release(memSize(item.Raw))
 
 		case item := <-queue:
 			_ = p2p.Send(p.rw, item.Code, item.Raw)
@@ -207,8 +206,10 @@ func memSize(v rlp.RawValue) dag.Metric {
 }
 
 func (p *peer) asyncSendEncodedItem(raw rlp.RawValue, code uint64, queue chan broadcastItem) bool {
-	if !p.queuedDataSemaphore.TryAcquire(memSize(raw)) {
-		return false
+	if queue != p.fastQueue {
+		if !p.queuedDataSemaphore.TryAcquire(memSize(raw)) {
+			return false
+		}
 	}
 	item := broadcastItem{
 		Code: code,

@@ -155,67 +155,70 @@ func TestOptimize(t *testing.T) {
 	// 		oneFtm := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	// 		amountIn := new(big.Int).Mul(oneFtm, big.NewInt(1))
 	// 		d := &Dexter{
-	// 			pairsInfo: make(map[common.Address]*PairInfo),
+	// 			pairsInfo: make(map[common.Address]*PoolInfo),
 	// 		}
-	// 		d.pairsInfo[common.HexToAddress("0x121")] = &PairInfo{
+	// 		d.pairsInfo[common.HexToAddress("0x121")] = &PoolInfo{
 	// 			reserve0:     FloatToBigInt(10 * math.Pow(10, 18)),
 	// 			reserve1:     FloatToBigInt(22 * math.Pow(10, 18)),
 	// 			token0:       common.HexToAddress("0x100"),
 	// 			token1:       common.HexToAddress("0x200"),
 	// 			feeNumerator: StringToBigInt("997000"),
 	// 		}
-	// 		d.pairsInfo[common.HexToAddress("0x122")] = &PairInfo{
+	// 		d.pairsInfo[common.HexToAddress("0x122")] = &PoolInfo{
 	// 			reserve0:     FloatToBigInt(10 * math.Pow(10, 18)),
 	// 			reserve1:     FloatToBigInt(21 * math.Pow(10, 18)),
 	// 			token0:       common.HexToAddress("0x100"),
 	// 			token1:       common.HexToAddress("0x200"),
 	// 			feeNumerator: StringToBigInt("997000"),
 	// 		}
-	// 		d.pairsInfo[common.HexToAddress("0x231")] = &PairInfo{
+	// 		d.pairsInfo[common.HexToAddress("0x231")] = &PoolInfo{
 	// 			reserve0:     FloatToBigInt(10 * math.Pow(10, 18)),
 	// 			reserve1:     FloatToBigInt(22 * math.Pow(10, 12)),
 	// 			token0:       common.HexToAddress("0x200"),
 	// 			token1:       common.HexToAddress("0x300"),
 	// 			feeNumerator: StringToBigInt("997000"),
 	// 		}
-	// 		d.pairsInfo[common.HexToAddress("0x232")] = &PairInfo{
+	// 		d.pairsInfo[common.HexToAddress("0x232")] = &PoolInfo{
 	// 			reserve0:     FloatToBigInt(100 * math.Pow(10, 18)),
 	// 			reserve1:     FloatToBigInt(200 * math.Pow(10, 12)),
 	// 			token0:       common.HexToAddress("0x200"),
 	// 			token1:       common.HexToAddress("0x300"),
 	// 			feeNumerator: StringToBigInt("997000"),
 	// 		}
-	// 		d.pairsInfo[common.HexToAddress("0x311")] = &PairInfo{
+	// 		d.pairsInfo[common.HexToAddress("0x311")] = &PoolInfo{
 	// 			reserve0:     FloatToBigInt(300 * math.Pow(10, 12)),
 	// 			reserve1:     FloatToBigInt(100 * math.Pow(10, 18)),
 	// 			token0:       common.HexToAddress("0x300"),
 	// 			token1:       common.HexToAddress("0x100"),
 	// 			feeNumerator: StringToBigInt("997000"),
 	// 		}
-	// 		// d.pairsInfo[common.HexToAddress("0x312")] = &PairInfo{
+	// 		// d.pairsInfo[common.HexToAddress("0x312")] = &PoolInfo{
 	// 		// 	reserve0:     FloatToBigInt(400 * math.Pow(10, 12)),
 	// 		// 	reserve1:     FloatToBigInt(100 * math.Pow(10, 18)),
 	// 		// 	token0:       common.HexToAddress("0x300"),
 	// 		// 	token1:       common.HexToAddress("0x100"),
 	// 		// 	feeNumerator: StringToBigInt("997000"),
 	// 		// }
-	// 		root1 := findRoot(d.pairsInfo[common.HexToAddress("0x121")],
-	// 			d.pairsInfo[common.HexToAddress("0x122")], common.HexToAddress("0x100"))
-	// 		root2 := findRoot(d.pairsInfo[common.HexToAddress("0x231")],
-	// 			d.pairsInfo[common.HexToAddress("0x232")], common.HexToAddress("0x200"))
+	// 		// root1 := findRoot(d.pairsInfo[common.HexToAddress("0x121")],
+	// 		// 	d.pairsInfo[common.HexToAddress("0x122")], common.HexToAddress("0x100"))
+	// 		// root2 := findRoot(d.pairsInfo[common.HexToAddress("0x231")],
+	// 		// 	d.pairsInfo[common.HexToAddress("0x232")], common.HexToAddress("0x200"))
 	// 		route := []*Leg{
 	// 			&Leg{
-	// 				From: common.HexToAddress("0x100"),
-	// 				To:   common.HexToAddress("0x200"),
-	// 				// PairAddrs: []common.Address{common.HexToAddress("0x121")},
-	// 				PairAddrs: []common.Address{common.HexToAddress("0x121"), common.HexToAddress("0x122")},
-	// 				Root:      root1,
+	// 				From:      common.HexToAddress("0x100"),
+	// 				To:        common.HexToAddress("0x200"),
+	// 				PairAddrs: []common.Address{common.HexToAddress("0x121")},
+	// 				// PairAddrs: []common.Address{common.HexToAddress("0x121"), common.HexToAddress("0x122")},
+	// 				Root: big.NewInt(0),
+	// 				// Root: root1,
 	// 			},
 	// 			&Leg{
-	// 				From:      common.HexToAddress("0x200"),
-	// 				To:        common.HexToAddress("0x300"),
-	// 				PairAddrs: []common.Address{common.HexToAddress("0x231"), common.HexToAddress("0x232")},
-	// 				Root:      root2,
+	// 				From: common.HexToAddress("0x200"),
+	// 				To:   common.HexToAddress("0x300"),
+	// 				// PairAddrs: []common.Address{common.HexToAddress("0x231"), common.HexToAddress("0x232")},
+	// 				PairAddrs: []common.Address{common.HexToAddress("0x231")},
+	// 				// Root:      root2,
+	// 				Root: big.NewInt(0),
 	// 			},
 	// 			&Leg{
 	// 				From:      common.HexToAddress("0x300"),
