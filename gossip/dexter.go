@@ -16,6 +16,7 @@ import (
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_vault"
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_weighted_pool"
 	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/ierc20"
 	"github.com/Fantom-foundation/go-opera/contracts/uniswap_pair_lite"
 	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/evmcore"
@@ -35,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	notify "github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	lru "github.com/hashicorp/golang-lru"
 )
 
 const (
@@ -44,16 +46,19 @@ const (
 )
 
 var (
-	// fishAddr = common.HexToAddress("0xd4dB252c5De305630e34957eD3931Ee5284582e7")
-	fishAddr                     = common.HexToAddress("0xa50B5c30537E000482A041cC2C5C62331739A3aC")
+	// fishAddr = common.HexToAddress("0xa50B5c30537E000482A041cC2C5C62331739A3aC")
+	fishAddr = common.HexToAddress("0x7B78cF4B384A1646B896a009adA1e95F3b3935f3")
+
 	nullAddr                     = common.HexToAddress("0x0000000000000000000000000000000000000000")
 	bVaultAddr                   = common.HexToAddress("0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce")
 	syncEventTopic               = []byte{0x1c, 0x41, 0x1e, 0x9a, 0x96, 0xe0, 0x71, 0x24, 0x1c, 0x2f, 0x21, 0xf7, 0x72, 0x6b, 0x17, 0xae, 0x89, 0xe3, 0xca, 0xb4, 0xc7, 0x8b, 0xe5, 0x0e, 0x06, 0x2b, 0x03, 0xa9, 0xff, 0xfb, 0xba, 0xd1}
-	transferEventTopic           = []byte{0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, 0x69, 0xc2, 0xb0, 0x68, 0xfc, 0x37, 0x8d, 0xaa, 0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x16, 0x28, 0xf5, 0x5a, 0x4d, 0xf5, 0x23, 0xb3, 0xef}
+	syncSolidlyEventTopic        = common.FromHex("0xcf2aa50876cdfbb541206f89af0ee78d44a2abf8d328e37fa4917f982149848a")
 	swapEventTopic               = common.FromHex("0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b")
+	poolBalanceChangedEventTopic = common.FromHex("0xe5ce249087ce04f05a957192435400fd97868dba0e6a4b4c049abf8af80dae78")
 	poolGetReservesAbi           = uniswap_pair_lite.GetReserves()
 	poolToken0Abi                = uniswap_pair_lite.Token0()
 	poolToken1Abi                = uniswap_pair_lite.Token1()
+	decimalsAbi                  = ierc20.Decimals()
 	getSwapFeePercentageAbi      = balancer_v2_weighted_pool.GetSwapFeePercentage()
 	getAmplificationParameterAbi = balancer_v2_stable_pool.GetAmplificationParameter()
 	getNormalizedWeightsAbi      = balancer_v2_weighted_pool.GetNormalizedWeights()
@@ -73,28 +78,39 @@ var (
 		55,
 	}
 	arbitrageurs = map[common.Address]string{
-		common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52"): "Mr Million",
-		common.HexToAddress("0x6C080c87e84e71C4c8364128dBE66f5e30a0e370"): "Starving Artist",
-		common.HexToAddress("0x244FAcabcf7a1026849B53295b1F7279a1bD597b"): "Topher Ford",
-		common.HexToAddress("0xd20d27d5cB769522410e0A2f32000C947af7Ffe5"): "Dee Twenny",
+		common.HexToAddress("0x000000006e983475CD576ae3CCe9caABEc9cF13E"): "Zero chill",
 		common.HexToAddress("0x0306c72b69E62be7c7168828cB98Dd41A0B01f8B"): "Flash Boy",
-		common.HexToAddress("0x4365C7DD814e1f4b3104B6b5C1079B32b1eA6E8D"): "Sam McGee",
-		common.HexToAddress("0xD8E1D3608D927d370afFE5EaaF6B050BDc11df6E"): "Daisy with a Reputation",
+		common.HexToAddress("0x244FAcabcf7a1026849B53295b1F7279a1bD597b"): "Topher Ford",
 		common.HexToAddress("0x3BCC05Bc23a6D3223C09F1724bE631c3A2Ff3a77"): "Flipper",
-		common.HexToAddress("0x708E6A5E3b0109830cEF2121519849EfB4d8375D"): "Wife Beater",
-		common.HexToAddress("0xB8A78253Fc10Dac192027c197759da3446357E74"): "Mister Baiter", // todo: Research this guy.
-		common.HexToAddress("0xcB00E3db4c4DCB7B07A2f9A89b6AaBac8E9c6B6D"): "Sea Boo",
-		common.HexToAddress("0x66Cc927Cb26068E31c6dF653535586B16B6c376b"): "Sixty Six Sisi",
-		common.HexToAddress("0x6db8d1131caae893e19dd684dcc134109c56aaaa"): "Six Decibel Swinger",
-		common.HexToAddress("0xC9A3d59AcbF2A8c856cA5E8c323623Ff11e3aBb2"): "Senile Amy",
-		common.HexToAddress("0x404DD158b88ab41d28Eb03573516d1A67A2397Ed"): "DD Not found",
-		common.HexToAddress("0xa0f26fe4a657b17b463eacb37de49102e3b5be75"): "Awful Albert",
-		common.HexToAddress("0xF501d66f609290D1E6759dFcFA88F869A82fDC97"): "Husky 501",
-		common.HexToAddress("0xe89ad2d3cc5df094175f2c29d22cfbab5d09e7b7"): "High roller",
-		common.HexToAddress("0xa775eBB05Aff8c46048e66FF3fc76A53c3801245"): "Creative accountant",
+		common.HexToAddress("0x4365C7DD814e1f4b3104B6b5C1079B32b1eA6E8D"): "Sam McGee",
+		common.HexToAddress("0x4d339bbDF3f5B67220Eb2B78A7831D6dDcbC74B3"): "Goody two shoes",
 		common.HexToAddress("0x4a634281D3C2aF3a21469f2Ba1ad47b59dA8b752"): "Old faithful",
+		common.HexToAddress("0x64348f0c72D746b979E1b9d461Ef92dB7a52B6f8"): "Awful Albert",
+		common.HexToAddress("0x66Cc927Cb26068E31c6dF653535586B16B6c376b"): "Sixty Six Sisi",
+		common.HexToAddress("0x6C080c87e84e71C4c8364128dBE66f5e30a0e370"): "Starving Artist",
+		common.HexToAddress("0x6db8d1131caae893e19dd684dcc134109c56aaaa"): "Six Decibel Swinger",
+		common.HexToAddress("0x708E6A5E3b0109830cEF2121519849EfB4d8375D"): "Wife Beater",
 		common.HexToAddress("0x7536b89f556533200b063e112db947192335a981"): "Broke uni student",
 		common.HexToAddress("0x80850B0Cff30EBFDa6cC8cf3b200dD9477C25F34"): "Bob the amateur",
+		common.HexToAddress("0xB8A78253Fc10Dac192027c197759da3446357E74"): "Mister Baiter", // todo: Research this guy.
+		common.HexToAddress("0xC9A3d59AcbF2A8c856cA5E8c323623Ff11e3aBb2"): "Senile Amy",
+		common.HexToAddress("0xD8E1D3608D927d370afFE5EaaF6B050BDc11df6E"): "Daisy with a Reputation",
+		common.HexToAddress("0xF501d66f609290D1E6759dFcFA88F869A82fDC97"): "Husky 501",
+		common.HexToAddress("0xa775eBB05Aff8c46048e66FF3fc76A53c3801245"): "Creative accountant",
+		common.HexToAddress("0xc29aACEa6Fb1D5d1Ebe38D88Cd5C8a8eb397f316"): "New kid on the block",
+		common.HexToAddress("0xcB00E3db4c4DCB7B07A2f9A89b6AaBac8E9c6B6D"): "Sea Boo",
+		common.HexToAddress("0xd20d27d5cB769522410e0A2f32000C947af7Ffe5"): "Dee Twenny",
+		common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52"): "Mr Million",
+		common.HexToAddress("0xe89ad2d3cc5df094175f2c29d22cfbab5d09e7b7"): "High roller",
+		common.HexToAddress("0xf423cdfdB1a54876fAE0515Ec9Cf325c91B537A5"): "Ford Twenty Three",
+		common.HexToAddress("0x0f8f339CE002166f32308C091B6e4EecBDdDD2Bd"): "High fiver",
+		common.HexToAddress("0x11a2c2bc43c02b5c0893c82d0dcf86a4e9540536"): "Eleven Aces",
+		common.HexToAddress("0x50aE81C68B499386065f7E6f89bBE14da64a6C04"): "Short Bus Susan",
+		common.HexToAddress("0xedaa29dac8556de71b68440acfce284e755f0bb4"): "Stable Eddie",
+		common.HexToAddress("0x063a37c556904f9a5a70d0cba4e5edaba2570753"): "Primitive Pete",
+		common.HexToAddress("0x0d1e08ff8513947509162eb8bdb02e6ee892c7f3"): "Lazy Larry",
+		common.HexToAddress("0x00F496939f165119eC0bBeaC346508f4a4D5ccAC"): "Egghead",
+		common.HexToAddress("0x9e8727b8423a37609a7a03a4e961611b9713ea1f"): "The Humans Are Dead",
 	}
 	contracts = map[common.Address]string{
 		common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8"): "Fish3",
@@ -153,6 +169,7 @@ type Dexter struct {
 	globalGasFloor int64
 	globalGasPrice int64
 	numPending     int
+	methodist      *dexter.Methodist
 	mu             sync.RWMutex
 }
 
@@ -173,9 +190,11 @@ type TxSub struct {
 }
 
 type FiredTx struct {
-	Hash       common.Hash
-	StrategyID int
-	Time       time.Time
+	Hash         common.Hash
+	StrategyID   int
+	Time         time.Time
+	Plan         *dexter.Plan
+	TargetMethod dexter.Method
 }
 
 type PoolInfoJson struct {
@@ -189,7 +208,7 @@ type PoolInfoJson struct {
 func NewDexter(svc *Service) *Dexter {
 	d := &Dexter{
 		svc:               svc,
-		inTxChan:          make(chan *types.Transaction, 4096),
+		inTxChan:          make(chan *types.Transaction, 32),
 		inLogsChan:        make(chan []*types.Log, 4096),
 		inBlockChan:       make(chan evmcore.ChainHeadNotify, 4096),
 		inEpochChan:       make(chan idx.Epoch, 4096),
@@ -210,23 +229,39 @@ func NewDexter(svc *Service) *Dexter {
 		// tokenWhitelistChan: make(chan common.Address, 128),
 		poolsInfo: make(map[common.Address]*dexter.PoolInfo),
 		gasFloors: make(map[idx.ValidatorID]int64),
+		methodist: dexter.NewMethodist(root, 60*time.Second),
 	}
 	d.strategies = []dexter.Strategy{
 
 		dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
-			RoutesFileName:          root + "route_cache_routes_len2-4.json",
-			PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len2-4.json",
+			RoutesFileName:          root + "route_caches/solidly_routes_len2-4.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
 		}),
 
 		dexter.NewLinearStrategy("Linear sans wftm", 1, d.railgunChan, dexter.LinearStrategyConfig{
-			RoutesFileName:          root + "route_cache_routes_no_wftm_2-5.json",
-			PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_no_wftm_2-5.json",
+			RoutesFileName:          root + "route_caches/solidly_routes_no_wftm_2-4.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_no_wftm_2-4.json",
 		}),
 
-		dexter.NewBalancerLinearStrategy("Balancer Linear", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-			RoutesFileName:          root + "balancer_cache_routes_len2-4.json",
-			PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2-4.json",
+		// dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_cache_routes_len2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len2-4.json",
+		// }),
+
+		// dexter.NewLinearStrategy("Linear sans wftm", 1, d.railgunChan, dexter.LinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_cache_routes_no_wftm_2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_no_wftm_2-4.json",
+		// }),
+
+		dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 		}),
+
+		// dexter.NewBalancerLinearStrategy("Balancer Linear", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+		// 	RoutesFileName:          root + "balancer_cache_routes_len2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2-4.json",
+		// }),
 
 		//
 	}
@@ -259,7 +294,7 @@ func NewDexter(svc *Service) *Dexter {
 			log.Warn("Could not find PoolInfo for interested pool", "addr", poolAddr)
 			continue
 		}
-		if t == dexter.UniswapV2Pair {
+		if t == dexter.UniswapV2Pair || t == dexter.SolidlyVolatilePool || t == dexter.SolidlyStablePool {
 			reserve0, reserve1 := d.getReserves(&poolAddr)
 			token0, token1 := d.getUniswapPairTokens(&poolAddr)
 			d.poolsInfo[poolAddr] = &dexter.PoolInfo{
@@ -289,35 +324,43 @@ func NewDexter(svc *Service) *Dexter {
 		}
 		fee := d.getSwapFeePercentage(&poolAddr)
 		poolInfo := dexter.PoolInfo{
-			Fee:        fee,
-			Reserves:   make(map[common.Address]*big.Int),
-			Weights:    make(map[common.Address]*big.Int),
-			LastUpdate: time.Now(),
+			Fee:          fee,
+			Reserves:     make(map[common.Address]*big.Int),
+			Weights:      make(map[common.Address]*big.Int),
+			ScaleFactors: make(map[common.Address]*big.Int),
+			LastUpdate:   time.Now(),
+			Type:         t,
 		}
-		if t == dexter.BalancerWeightedPool {
+		if t == dexter.BalancerWeightedPool || t == dexter.BalancerStablePool {
 			d.poolsInfo[poolAddr] = &poolInfo
 			poolTokens := d.getPoolTokens(poolId)
 			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
 			poolInfo.Tokens = poolTokens.Tokens
-			weights := d.getNormalizedWeights(&poolAddr)
-			for i, bal := range poolTokens.Balances {
-				poolInfo.Reserves[poolTokens.Tokens[i]] = bal
-				poolInfo.Weights[poolTokens.Tokens[i]] = weights[i]
+			for _, tokAddr := range poolInfo.Tokens {
+				decimals := d.decimals(&tokAddr)
+				decimalsDiff := int64(18 - decimals)
+				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+				poolInfo.ScaleFactors[tokAddr] = scaleFactor
+			}
+			if t == dexter.BalancerWeightedPool {
+				weights := d.getNormalizedWeights(&poolAddr)
+				for i, bal := range poolTokens.Balances {
+					poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+					poolInfo.Weights[poolTokens.Tokens[i]] = weights[i]
+				}
+			} else if t == dexter.BalancerStablePool {
+				amp := d.getAmplificationParameter(&poolAddr)
+				poolInfo.AmplificationParam = amp
+				log.Info("Initializing stable pool", "amp", amp, "id", poolId)
+				for i, bal := range poolTokens.Balances {
+					poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+				}
 			}
 			// log.Info("PoolInfo", "id", poolId, "info", poolInfo)
-		} else if t == dexter.BalancerStablePool {
-			d.poolsInfo[poolAddr] = &poolInfo
-			poolTokens := d.getPoolTokens(poolId)
-			poolInfo.Tokens = poolTokens.Tokens
-			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
-			amp := d.getAmplificationParameter(&poolAddr)
-			poolInfo.AmplificationParam = amp
-			for i, bal := range poolTokens.Balances {
-				poolInfo.Reserves[poolTokens.Tokens[i]] = bal
-			}
 		}
 		d.poolsInfo[poolAddr] = &poolInfo
 	}
+	log.Info("Min gas price", "minGasPrice", d.svc.store.GetRules().Economy.MinGasPrice)
 
 	for _, s := range d.strategies {
 		s.SetPoolsInfo(d.poolsInfo)
@@ -330,6 +373,7 @@ func NewDexter(svc *Service) *Dexter {
 	go d.watchEvents()
 	go d.eventRace()
 	go d.runRailgun()
+	go d.updateMethods()
 	svc.handler.RaceEvents(d.eventRaceChan)
 	svc.handler.RaceTxs(d.txRaceChan)
 	return d
@@ -588,15 +632,14 @@ func (d *Dexter) refreshGuns() {
 
 func (d *Dexter) processIncomingLogs() {
 	log.Info("Started dexter")
-	methods := make(map[[4]byte]int)
-	methodUsers := make(map[[4]byte]*common.Address)
-	numUpdates := 0
 	for {
 		// FIXME: Convert this to a map[common.Address]PoolUpdate to dedupe.
 		var updates []*dexter.PoolUpdate
 		select {
 		case logs := <-d.inLogsChan:
+			var lastTxIndex uint = math.MaxUint64
 			for _, l := range logs {
+				updated := false
 				poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
 				if poolAddr != nil {
 					_, ok := d.interestedPairs[*poolAddr]
@@ -608,37 +651,8 @@ func (d *Dexter) processIncomingLogs() {
 						Addr:     *poolAddr,
 						Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 					})
-					block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
-					if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
-						continue
-					}
-					tx := block.Transactions[l.TxIndex]
-					data := tx.Data()
-					var method [4]byte
-					if len(data) >= 4 {
-						numUpdates++
-						copy(method[:], data[:4])
-						if methodScore, ok := methods[method]; ok {
-							methods[method] = methodScore + 1
-						} else {
-							methods[method] = 1
-							methodUsers[method] = tx.To()
-						}
-					}
-					// } else if len(l.Topics) >= 1 && bytes.Compare(l.Topics[0].Bytes(), transferEventTopic) == 0 {
-					// 	// log.Info("Transfer TX", "addr", l.Address)
-					// 	block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
-					// 	if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
-					// 		continue
-					// 	}
-					// 	tx := block.Transactions[l.TxIndex]
-					// 	if tx.To() == nil {
-					// 		continue
-					// 	}
-					// 	if _, ok := arbitrageurs[*tx.To()]; ok {
-					// 		d.tokenWhitelistChan <- l.Address
-					// 	}
-				} else if len(l.Topics) >= 2 && bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 {
+					updated = true
+				} else if len(l.Topics) >= 2 && (bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 || bytes.Compare(l.Topics[0].Bytes(), poolBalanceChangedEventTopic) == 0) {
 					var poolId dexter.BalPoolId
 					copy(poolId[:], l.Topics[1].Bytes())
 					var poolAddr common.Address = common.BytesToAddress(poolId[:20])
@@ -653,6 +667,24 @@ func (d *Dexter) processIncomingLogs() {
 						u.Reserves[tokAddr] = pool.Balances[i]
 					}
 					updates = append(updates, u)
+					updated = true
+				}
+				if updated && l.TxIndex != lastTxIndex {
+					lastTxIndex = l.TxIndex
+					block := d.svc.EthAPI.state.GetBlock(common.Hash{}, l.BlockNumber)
+					if block == nil || uint(len(block.Transactions)) <= l.TxIndex {
+						continue
+					}
+					tx := block.Transactions[l.TxIndex]
+					data := tx.Data()
+					to := tx.To()
+					if len(data) >= 4 && to != nil {
+						if _, ok := arbitrageurs[*to]; !ok {
+							var method [4]byte
+							copy(method[:], data[:4])
+							d.methodist.Record(dexter.MethodEvent{method, dexter.UpdatedReserves, tx.Hash()})
+						}
+					}
 				}
 			}
 			if len(updates) > 0 {
@@ -660,14 +692,8 @@ func (d *Dexter) processIncomingLogs() {
 					s.ProcessPermUpdates(updates)
 				}
 			}
-			// if numUpdates > 1000 {
-			// 	numUpdates = 0
-			// 	log.Info("1000 updates, dumping methods")
-			// 	methodPools := mapToSortedBytePools(methods)
-			// 	for _, p := range methodPools {
-			// 		log.Info("Method score", "method", p.Key, "score", p.Value, "user", methodUsers[p.Key])
-			// 	}
-			// 	methods = make(map[[4]byte]int)
+			// if numUpdates > 100 {
+			// 	d.svc.txpool.AddMethods(methods)
 			// }
 		case <-d.inLogsSub.Err():
 			return
@@ -678,13 +704,18 @@ func (d *Dexter) processIncomingLogs() {
 
 func (d *Dexter) processIncomingTxs() {
 	log.Info("Started dexter")
-	txCapacity := 1000
-	seenTxs := make(map[common.Hash]struct{}, txCapacity)
+	// txCapacity := 1000
+	// seenTxs := make(map[common.Hash]struct{}, txCapacity)
+	seenTxs, _ := lru.New(4096)
 	watchedTxMap := make(map[common.Hash]*FiredTx)
 	numFiredThisBlock := 0
 	for {
 		select {
 		case tx := <-d.inTxChan:
+			if _, ok := seenTxs.Get(tx.Hash()); ok {
+				continue
+			}
+			seenTxs.Add(tx.Hash(), struct{}{})
 			if numFiredThisBlock >= maxShotsPerBlock {
 				continue
 			}
@@ -694,14 +725,14 @@ func (d *Dexter) processIncomingTxs() {
 			if _, ok := d.ignoreTxs[tx.Hash()]; ok {
 				continue
 			}
-			if _, ok := seenTxs[tx.Hash()]; ok {
-				continue
-			}
-			if len(seenTxs) > txCapacity {
-				seenTxs = make(map[common.Hash]struct{}, txCapacity)
-			}
-			seenTxs[tx.Hash()] = struct{}{}
-			// log.Info("Dexter received tx", "hash", tx.Hash().Hex())
+			// if _, ok := seenTxs[tx.Hash()]; ok {
+			// 	continue
+			// }
+			// if len(seenTxs) > txCapacity {
+			// 	seenTxs = make(map[common.Hash]struct{}, txCapacity)
+			// }
+			// seenTxs[tx.Hash()] = struct{}{}
+			// log.Info("Dexter received tx", "hash", tx.Hash().Hex(), "queue", len(d.inTxChan))
 			d.processTx(tx)
 			d.numPending, _ = d.svc.txpool.Stats()
 		case n := <-d.inBlockChan:
@@ -720,15 +751,27 @@ func (d *Dexter) processIncomingTxs() {
 				continue
 			}
 			for i, tx := range n.Block.Transactions {
+				data := tx.Data()
+				if len(data) < 4 {
+					continue
+				}
+				var method [4]byte
+				copy(method[:], data[:4])
+				if d.methodist.Interested(method) {
+					d.methodist.Record(dexter.MethodEvent{method, dexter.Confirmed, tx.Hash()})
+				}
 				if f, ok := watchedTxMap[tx.Hash()]; ok {
 					receipt := receipts[i]
+					gasEst := new(big.Int).Div(f.Plan.GasCost, f.Plan.GasPrice)
 					if receipt.Status == types.ReceiptStatusSuccessful {
+						d.methodist.Record(dexter.MethodEvent{f.TargetMethod, dexter.Success, tx.Hash()})
 
 						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID]*bravadoAlpha + (1 - bravadoAlpha)
-						log.Info("SUCCESS", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)))
+						log.Info("SUCCESS", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)), "gas", receipt.GasUsed, "estimated", gasEst, "est profit", dexter.BigIntToFloat(f.Plan.NetProfit)/1e18)
 					} else {
+						// d.diagnoseTx(tx, f)
 						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID] * bravadoAlpha
-						log.Info("Fail", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)))
+						log.Info("Fail", "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)), "gas", receipt.GasUsed, "estimated", gasEst, "est profit", dexter.BigIntToFloat(f.Plan.NetProfit)/1e18)
 					}
 					delete(watchedTxMap, tx.Hash())
 				}
@@ -752,16 +795,23 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 	validators, epoch := d.svc.store.GetEpochValidators() // TODO: Move this up?
 	validatorIDs := d.predictValidators(from, tx.Nonce(), validators, epoch, numValidators)
 	d.watchedTxs <- &TxSub{Hash: tx.Hash(), PredictedValidators: validatorIDs, Print: false, StartTime: start}
-	if tx.GasPrice().Cmp(MaxGasPrice) == 1 {
+	data := tx.Data()
+	if len(data) < 4 {
 		return
 	}
-	if d.numPending > congestedPending {
-		if gasFloor, ok := d.gasFloors[validatorIDs[0]]; ok {
-			if tx.GasPrice().Int64() < (gasFloor+d.globalGasFloor)/2 {
-				return
-			}
-		}
-	}
+	var method [4]byte
+	copy(method[:], data[:4])
+	d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
+	// if tx.GasPrice().Cmp(MaxGasPrice) == 1 {
+	// 	return
+	// }
+	// if d.numPending > congestedPending {
+	// 	if gasFloor, ok := d.gasFloors[validatorIDs[0]]; ok {
+	// 		if tx.GasPrice().Int64() < (gasFloor+d.globalGasFloor)/2 {
+	// 			return
+	// 		}
+	// 	}
+	// }
 	bs := d.svc.store.GetBlockState().Copy()
 	evmStateReader := &EvmStateReader{
 		ServiceFeed: &d.svc.feed,
@@ -794,7 +844,7 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 					Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 				})
 			}
-		} else if len(l.Topics) >= 2 && bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 {
+		} else if len(l.Topics) >= 2 && (bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 || bytes.Compare(l.Topics[0].Bytes(), poolBalanceChangedEventTopic) == 0) {
 			var poolId dexter.BalPoolId
 			copy(poolId[:], l.Topics[1].Bytes())
 			updatedPools = append(updatedPools, poolId)
@@ -822,8 +872,69 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 	}
 }
 
+// func (d *Dexter) processEvent(txs []*types.Transaction) {
+// 	start := time.Now()
+// 	bs := d.svc.store.GetBlockState().Copy()
+// 	evmStateReader := &EvmStateReader{
+// 		ServiceFeed: &d.svc.feed,
+// 		store:       d.svc.store,
+// 	}
+// 	statedb, err := d.svc.store.evm.StateDB(bs.FinalizedStateRoot)
+// 	if err != nil {
+// 		log.Info("Could not make StateDB", "err", err)
+// 		return
+// 	}
+// 	evmProcessor := evmcore.NewStateProcessor(
+// 		d.svc.store.GetRules().EvmChainConfig(),
+// 		evmStateReader)
+// 	evmBlock := d.evmBlockWith(txs, &bs, evmStateReader)
+// 	var gasUsed uint64
+// 	ptx := &dexter.PossibleTx{
+// 		Tx:           tx,
+// 		ValidatorIDs: validatorIDs,
+// 		StartTime:    start,
+// 	}
+// 	var updatedPools []dexter.BalPoolId
+// 	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
+// 		poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
+// 		if poolAddr != nil {
+// 			if _, ok := d.interestedPairs[*poolAddr]; ok {
+// 				token0, token1 := d.getUniswapPairTokens(poolAddr)
+// 				ptx.Updates = append(ptx.Updates, dexter.PoolUpdate{
+// 					Addr:     *poolAddr,
+// 					Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
+// 				})
+// 			}
+// 		} else if len(l.Topics) >= 2 && (bytes.Compare(l.Topics[0].Bytes(), swapEventTopic) == 0 || bytes.Compare(l.Topics[0].Bytes(), poolBalanceChangedEventTopic) == 0) {
+// 			var poolId dexter.BalPoolId
+// 			copy(poolId[:], l.Topics[1].Bytes())
+// 			updatedPools = append(updatedPools, poolId)
+// 			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
+// 		}
+// 	})
+// 	if len(ptx.Updates) == 0 && len(updatedPools) == 0 {
+// 		return
+// 	}
+// 	for _, poolId := range updatedPools {
+// 		evm := d.getEvm(statedb, evmStateReader, bs)
+// 		var poolAddr common.Address = common.BytesToAddress(poolId[:20])
+// 		pool := d.getPoolTokensFromEvm(poolId, evm)
+// 		u := dexter.PoolUpdate{
+// 			Addr:     poolAddr,
+// 			Reserves: make(map[common.Address]*big.Int),
+// 		}
+// 		for i, tokAddr := range pool.Tokens {
+// 			u.Reserves[tokAddr] = pool.Balances[i]
+// 		}
+// 		ptx.Updates = append(ptx.Updates, u)
+// 	}
+// 	for _, s := range d.strategies {
+// 		s.ProcessPossibleTx(ptx)
+// 	}
+// }
+
 func getReservesFromSyncLog(l *types.Log) (*common.Address, *big.Int, *big.Int) {
-	if len(l.Topics) != 1 || bytes.Compare(l.Topics[0].Bytes(), syncEventTopic) != 0 {
+	if len(l.Topics) != 1 || (bytes.Compare(l.Topics[0].Bytes(), syncEventTopic) != 0 && bytes.Compare(l.Topics[0].Bytes(), syncSolidlyEventTopic) != 0) {
 		return nil, nil, nil
 	}
 	reserve0 := new(big.Int).SetBytes(l.Data[:32])
@@ -841,27 +952,26 @@ func (d *Dexter) runRailgun() {
 		case guns := <-d.gunRefreshes:
 			d.gunList = guns
 		case p := <-d.railgunChan:
-			log.Info("Received railgun request", "strategy", p.StrategyID)
-			deadline := time.After(5 * time.Millisecond)
-		loop:
-			for {
-				select {
-				case p2 := <-d.railgunChan:
-					if p2.Response.NetProfit.Cmp(p.Response.NetProfit) > 0 {
-						log.Info("Overriding plan with more profitable plan", "strategy1", p.StrategyID, "strategy2", p2.StrategyID, "profit1", p.Response.NetProfit, "profit2", p2.Response.NetProfit)
-						p = p2
-					}
-				case <-deadline:
-					break loop
-				}
-			}
+			// log.Info("Received railgun request", "strategy", p.StrategyID)
+			// deadline := time.After(5 * time.Millisecond)
+			// loop:
+			// for {
+			// 	select {
+			// 	case p2 := <-d.railgunChan:
+			// 		if p2.Response.NetProfit.Cmp(p.Response.NetProfit) > 0 {
+			// 			log.Info("Overriding plan with more profitable plan", "strategy1", p.StrategyID, "strategy2", p2.StrategyID, "profit1", p.Response.NetProfit, "profit2", p2.Response.NetProfit)
+			// 			p = p2
+			// 		}
+			// 	case <-deadline:
+			// 		break loop
+			// 	}
+			// }
 			bravado := d.strategyBravado[p.StrategyID]
-			probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado*0.5)))
+			probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
 			failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
-			probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(1e6)))
+			probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(1e6-(d.accuracy*bravado))))
 			if probAdjustedPayoff.Cmp(probAdjustedFailCost) == -1 {
-				// log.Info("Win/lose costs", "win", probAdjustedPayoff, "lose", probAdjustedFailCost, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", p.Response.NetProfit, "unadjusted lose", failCost)
-				// log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado)
+				// log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado, "probAdjustedPayoff", dexter.BigIntToFloat(probAdjustedPayoff)/1e18, "lose", dexter.BigIntToFloat(probAdjustedFailCost)/1e18, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", dexter.BigIntToFloat(p.Response.NetProfit)/1e18, "unadjusted lose", dexter.BigIntToFloat(failCost)/1e18)
 				continue
 			}
 			validatorIDs := p.ValidatorIDs
@@ -890,13 +1000,27 @@ func (d *Dexter) runRailgun() {
 				log.Error("Unsupported call type", "type", p.Type)
 				continue
 			}
-			fishTx := types.NewTransaction(nonce, fishAddr, common.Big0, 850000, p.Response.GasPrice, fishCall)
+			gas := uint64(dexter.BigIntToFloat(p.Response.GasCost) / dexter.BigIntToFloat(p.Response.GasPrice) * 1.3)
+			var fishTx *types.Transaction
+			if p.Target.Type() == types.LegacyTxType {
+				fishTx = types.NewTransaction(nonce, fishAddr, common.Big0, gas, p.Response.GasPrice, fishCall)
+			} else {
+				fishTx = types.NewTx(&types.DynamicFeeTx{
+					ChainID:   p.Target.ChainId(),
+					Nonce:     nonce,
+					GasTipCap: p.Target.GasTipCap(),
+					GasFeeCap: p.Target.GasFeeCap(),
+					Gas:       gas,
+					To:        &fishAddr,
+					Value:     common.Big0,
+					Data:      fishCall,
+				})
+			}
 			signedTx, err := wallet.SignTx(account, fishTx, d.svc.store.GetRules().EvmChainConfig().ChainID)
 			if err != nil {
 				log.Error("Could not sign tx", "err", err)
 				return
 			}
-			// TODO: Here is a fine spot to write onto txLagRequestChan
 			var label string
 			if p.Target != nil {
 				label = p.Target.Hash().Hex()
@@ -904,7 +1028,10 @@ func (d *Dexter) runRailgun() {
 			} else {
 				label = "block state"
 			}
-			log.Info("FIRING GUN pew pew", "lag", utils.PrettyDuration(time.Now().Sub(p.StartTime)), "hash", signedTx.Hash().Hex(), "strategy", p.StrategyID, "gas", p.Response.GasPrice)
+			log.Info("FIRING GUN pew pew",
+				"lag", utils.PrettyDuration(time.Now().Sub(p.StartTime)),
+				"total", utils.PrettyDuration(time.Now().Sub(p.Target.Time())),
+				"hash", signedTx.Hash().Hex(), "strategy", p.StrategyID, "gas", p.Response.GasPrice)
 			// log.Info("Fired tx", "url", "https://ftmscan.com/tx/"+signedTx.Hash().Hex())
 			go d.fireGun(wallet, signedTx, p, gun.ValidatorIDs, label)
 		}
@@ -912,9 +1039,7 @@ func (d *Dexter) runRailgun() {
 }
 
 func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx *types.Transaction, p *dexter.RailgunPacket, gunValidatorIDs []idx.ValidatorID, label string) {
-	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target})
-	// d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
-	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target, signedTx})
+	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{signedTx})
 	d.svc.txpool.AddLocal(signedTx)
 	if p.Target != nil {
 		d.watchedTxs <- &TxSub{
@@ -933,10 +1058,15 @@ func (d *Dexter) fireGun(wallet accounts.Wallet, signedTx *types.Transaction, p 
 		Print:               true,
 		StartTime:           time.Now(),
 	}
+	var method [4]byte
+	copy(method[:], p.Target.Data()[:4])
+	d.methodist.Record(dexter.MethodEvent{method, dexter.Fired, p.Target.Hash()})
 	d.firedTxChan <- &FiredTx{
-		Hash:       signedTx.Hash(),
-		StrategyID: p.StrategyID,
-		Time:       time.Now(),
+		Hash:         signedTx.Hash(),
+		StrategyID:   p.StrategyID,
+		Time:         time.Now(),
+		Plan:         p.Response,
+		TargetMethod: method,
 	}
 }
 
@@ -995,7 +1125,11 @@ func (d *Dexter) watchEvents() {
 							}
 						}
 					}
-					log.Info("TX in interesting event block", "nonce", tx.Nonce(), "gas price", tx.GasPrice(), "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
+					effectiveGasTip, err := tx.EffectiveGasTip(d.svc.store.GetRules().Economy.MinGasPrice)
+					if err != nil {
+						log.Error("Could not get effective gas tip", "tx", tx, "err", err)
+					}
+					log.Info("TX in event block", "t", tx.Type(), "price", tx.GasPrice(), "eGasTip", effectiveGasTip, "tipCap", tx.GasTipCap(), "feeCap", tx.GasFeeCap(), "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
 				}
 			}
 			if lowestGas != 0 && len(e.Txs()) > 1 {
@@ -1008,6 +1142,41 @@ func (d *Dexter) watchEvents() {
 		case w := <-d.watchedTxs:
 			watchedTxMap[w.Hash] = w
 		}
+	}
+}
+
+func (d *Dexter) getReserve(poolType dexter.PoolType, poolId dexter.BalPoolId, token common.Address) *big.Int {
+	if poolType == dexter.UniswapV2Pair || poolType == dexter.SolidlyVolatilePool || poolType == dexter.SolidlyStablePool {
+		poolAddr := common.BytesToAddress(poolId[:20])
+		token0, _ := d.getUniswapPairTokens(&poolAddr)
+		reserve0, reserve1 := d.getReserves(&poolAddr)
+		if bytes.Compare(token0.Bytes(), token.Bytes()) == 0 {
+			return reserve0
+		}
+		return reserve1
+	} else {
+		pool := d.getPoolTokens(poolId)
+		for i, candTok := range pool.Tokens {
+			if bytes.Compare(candTok.Bytes(), token.Bytes()) == 0 {
+				return pool.Balances[i]
+			}
+		}
+	}
+	return big.NewInt(0)
+}
+func (d *Dexter) diagnoseTx(tx *types.Transaction, f *FiredTx) {
+	for _, reserve := range f.Plan.Reserves {
+		reserve.Actual = d.getReserve(reserve.Type, reserve.PoolId, reserve.Token)
+		actualFloat := dexter.BigIntToFloat(reserve.Actual)
+		log.Info("reserve", "pool",
+			common.Bytes2Hex([]byte(reserve.PoolId[:])),
+			"tok", reserve.Token,
+			"o", reserve.Original,
+			"p", reserve.Predicted,
+			"a", reserve.Actual,
+			"diff", new(big.Int).Sub(reserve.Actual, reserve.Predicted),
+			"%", (100 * (actualFloat - dexter.BigIntToFloat(reserve.Predicted)) / actualFloat),
+		)
 	}
 }
 
@@ -1087,6 +1256,18 @@ func (d *Dexter) getNormalizedWeights(addr *common.Address) []*big.Int {
 	return balancer_v2_weighted_pool.UnpackGetNormalizedWeights(result.ReturnData)
 }
 
+func (d *Dexter) decimals(addr *common.Address) uint8 {
+	evm := d.getReadOnlyEvm()
+	msg := d.readOnlyMessage(addr, decimalsAbi)
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("decimals error", "err", err)
+		return 18
+	}
+	return uint8(result.ReturnData[31])
+}
+
 func (d *Dexter) getPoolTokens(poolId dexter.BalPoolId) struct {
 	Tokens          []common.Address
 	Balances        []*big.Int
@@ -1162,6 +1343,14 @@ func (d *Dexter) evmHeader(bs *iblockproc.BlockState, reader evmcore.DummyChain)
 
 func (d *Dexter) evmBlockWith(txs types.Transactions, bs *iblockproc.BlockState, reader evmcore.DummyChain) *evmcore.EvmBlock {
 	return evmcore.NewEvmBlock(d.evmHeader(bs, reader), txs)
+}
+
+func (d *Dexter) updateMethods() {
+	for {
+		time.Sleep(60 * time.Second)
+		white, black := d.methodist.GetLists()
+		d.svc.txpool.UpdateMethods(white, black)
+	}
 }
 
 // func (d *Dexter) runTokenWhitelister() {

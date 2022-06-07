@@ -96,7 +96,7 @@ func UnpackGetPoolTokens(data []byte) struct {
 		LastChangeBlock *big.Int
 	})
 	if err != nil {
-		log.Error("Error unpacking getPoolTokens", err)
+		log.Error("Error unpacking getPoolTokens", "err", err)
 		return *outstruct
 	}
 	outstruct.Tokens = out[0].([]common.Address)

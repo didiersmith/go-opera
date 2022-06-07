@@ -17,7 +17,6 @@
 package evmcore
 
 import (
-	"bytes"
 	"errors"
 	"math"
 	"math/big"
@@ -36,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 
+	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/utils/gsignercache"
 )
 
@@ -144,48 +144,61 @@ var (
 		common.HexToAddress("0xfD000ddCEa75a2E23059881c3589F6425bFf1AbB"),
 		common.HexToAddress("0xcdA8f0fB4132D977AD427d18555E0cb1b1dfA363"),
 	}
-	specialMethods = [][]byte{
-		[]byte{10, 242, 16, 161},
-		[]byte{108, 181, 140, 147}, // leave(address vault, uint256 share)
-		[]byte{112, 250, 226, 13},
-		[]byte{116, 58, 203, 128},
-		[]byte{124, 2, 82, 0},
-		[]byte{126, 27, 149, 7},
-		[]byte{127, 243, 106, 181}, // []byte{0x7f, 0xf3, 0x6a, 0xb5},
-		[]byte{136, 3, 219, 238},   // []byte{0x88, 0x03, 0xdb, 0xee},
-		[]byte{139, 219, 57, 19},   // BalancerV2
-		[]byte{14, 92, 1, 30},
-		[]byte{148, 91, 206, 201}, // BalancerV2 swap
-		[]byte{152, 208, 241, 112},
-		[]byte{162, 140, 54, 27},  // beefOut(address beefyVault, uint256 withdrawAmount)
-		[]byte{169, 78, 120, 239}, // AugustusSwapper
-		[]byte{185, 92, 172, 40},  // BalancerV2
-		[]byte{24, 203, 175, 229}, // []byte{0x18, 0xcb, 0xaf, 0xe5},
-		[]byte{202, 198, 55, 200},
-		[]byte{209, 208, 255, 73},
-		[]byte{215, 46, 247, 113}, // work(uint256 id, address worker, uint256 principalAmount, uint256 loan, uint256 maxReturn, bytes data) (interest bearing fantom)
-		[]byte{222, 95, 98, 104},
-		[]byte{222, 217, 56, 42},
-		[]byte{225, 22, 210, 2},
-		[]byte{230, 90, 1, 23}, // earn(uint256 _pid)
-		[]byte{232, 227, 55, 0},
-		[]byte{243, 5, 215, 25},
-		[]byte{245, 208, 123, 96}, // beefIn(address beefyVault, uint256 tokenAmountOutMin, address tokenIn, uint256 tokenInAmount)
-		[]byte{251, 59, 219, 65},  // []byte{0xfb, 0x3b, 0xdb, 0x41},
-		[]byte{253, 181, 160, 62},
-		[]byte{255, 194, 88, 15},
-		[]byte{28, 255, 121, 205},
-		[]byte{33, 149, 153, 92},
-		[]byte{46, 211, 145, 196},
-		[]byte{47, 89, 103, 235},
-		[]byte{56, 237, 23, 57},  // []byte{0x38, 0xed, 0x17, 0x39},
-		[]byte{65, 85, 101, 176}, // []byte{0x38, 0xed, 0x17, 0x39},
-		[]byte{70, 65, 37, 125},
-		[]byte{70, 198, 123, 109}, // AugustusSwapper
-		[]byte{74, 37, 217, 74},   // []byte{0x4a, 0x25, 0xd9, 0x4a},
-		[]byte{81, 201, 207, 145}, // beefOutAndSwap(address beefyVault, uint256 withdrawAmount, address desiredToken, uint256 desiredTokenOutMin)
-		[]byte{82, 187, 190, 41},  // BalancerV2
-		[]byte{84, 227, 243, 27},  // AugustusSwapper
+	specialMethods = [][4]byte{
+		[4]byte{10, 242, 16, 161},
+		[4]byte{108, 181, 140, 147}, // leave(address vault, uint256 share)
+		[4]byte{112, 250, 226, 13},
+		[4]byte{116, 58, 203, 128},
+		[4]byte{124, 2, 82, 0},
+		[4]byte{126, 27, 149, 7},
+		[4]byte{127, 243, 106, 181}, // []byte{0x7f, 0xf3, 0x6a, 0xb5},
+		[4]byte{136, 3, 219, 238},   // []byte{0x88, 0x03, 0xdb, 0xee},
+		[4]byte{139, 219, 57, 19},   // BalancerV2
+		[4]byte{14, 92, 1, 30},
+		[4]byte{119, 55, 13, 98},   // Tarot deleverage(address underlying, uint256 redeemTokens, uint256 amountAMin, uint256 amountBMin, uint256 deadline, bytes permitData)
+		[4]byte{148, 91, 206, 201}, // BalancerV2 swap
+		[4]byte{152, 208, 241, 112},
+		[4]byte{162, 140, 54, 27},  // beefOut(address beefyVault, uint256 withdrawAmount)
+		[4]byte{169, 78, 120, 239}, // AugustusSwapper
+		[4]byte{172, 150, 80, 216}, // Statera: multicall
+		[4]byte{184, 123, 11, 76},  // Gelato exec
+		[4]byte{185, 92, 172, 40},  // BalancerV2
+		[4]byte{194, 113, 126, 85}, // PaintSwap pay(bool _payingInBrush, address[] _path)
+		[4]byte{191, 179, 92, 38},  // 0x01c892c7b9fb9b1acd3584be12efff91278d5230
+		[4]byte{197, 134, 4, 101},  // Swing trader
+		[4]byte{24, 203, 175, 229}, // []byte{0x18, 0xcb, 0xaf, 0xe5},
+		[4]byte{202, 198, 55, 200},
+		[4]byte{207, 16, 129, 219}, // 0x256410f7b8951c879111dba3efa756ad1f2b402e
+		[4]byte{209, 208, 255, 73},
+		[4]byte{215, 46, 247, 113}, // work(uint256 id, address worker, uint256 principalAmount, uint256 loan, uint256 maxReturn, bytes data) (interest bearing fantom)
+		[4]byte{222, 95, 98, 104},
+		[4]byte{222, 217, 56, 42},
+		[4]byte{226, 187, 177, 88}, // deposit
+		[4]byte{225, 22, 210, 2},
+		[4]byte{230, 90, 1, 23}, // earn(uint256 _pid)
+		[4]byte{232, 227, 55, 0},
+		[4]byte{234, 253, 131, 50}, // Swing trader
+		[4]byte{236, 250, 49, 29},
+		[4]byte{243, 5, 215, 25},
+		[4]byte{243, 188, 168, 114}, // Swing trader
+		[4]byte{245, 208, 123, 96},  // beefIn(address beefyVault, uint256 tokenAmountOutMin, address tokenIn, uint256 tokenInAmount)
+		[4]byte{251, 59, 219, 65},   // []byte{0xfb, 0x3b, 0xdb, 0x41},
+		[4]byte{253, 181, 160, 62},  // Reinvest
+		[4]byte{253, 181, 254, 252}, // earn(address _bountyHunter)
+		[4]byte{255, 194, 88, 15},
+		[4]byte{28, 255, 121, 205},
+		[4]byte{33, 149, 153, 92},
+		[4]byte{46, 211, 145, 196},
+		[4]byte{47, 89, 103, 235},
+		[4]byte{56, 237, 23, 57},   // []byte{0x38, 0xed, 0x17, 0x39},
+		[4]byte{65, 85, 101, 176},  // []byte{0x38, 0xed, 0x17, 0x39},
+		[4]byte{70, 65, 37, 125},   // Harvest
+		[4]byte{70, 198, 123, 109}, // AugustusSwapper
+		[4]byte{74, 37, 217, 74},   // []byte{0x4a, 0x25, 0xd9, 0x4a},
+		[4]byte{81, 201, 207, 145}, // beefOutAndSwap(address beefyVault, uint256 withdrawAmount, address desiredToken, uint256 desiredTokenOutMin)
+		[4]byte{82, 187, 190, 41},  // BalancerV2
+		[4]byte{84, 227, 243, 27},  // AugustusSwapper
+		[4]byte{92, 17, 215, 149},  // swapExactTokensForTokensSupportingFeeOnTransferTokens
 	}
 	mrMillion = common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52")
 )
@@ -327,7 +340,8 @@ type TxPool struct {
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 
-	dexterTxChan chan *types.Transaction
+	dexterTxChan   chan *types.Transaction
+	specialMethods map[[4]byte]struct{}
 }
 
 type txpoolResetRequest struct {
@@ -357,6 +371,10 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 		reorgDoneCh:     make(chan chan struct{}),
 		reorgShutdownCh: make(chan struct{}),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
+		specialMethods:  make(map[[4]byte]struct{}),
+	}
+	for _, m := range specialMethods {
+		pool.specialMethods[m] = struct{}{}
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
@@ -392,6 +410,25 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 
 func (pool *TxPool) AttachDexter(c chan *types.Transaction) {
 	pool.dexterTxChan = c
+}
+
+func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
+	for _, m := range white {
+		if _, ok := pool.specialMethods[m]; !ok {
+			log.Info("Adding method to whitelist", "method", m)
+			pool.mu.Lock()
+			pool.specialMethods[m] = struct{}{}
+			pool.mu.Unlock()
+		}
+	}
+	for _, m := range black {
+		if _, ok := pool.specialMethods[m]; ok {
+			log.Info("Removing method from whitelist", "method", m)
+			pool.mu.Lock()
+			delete(pool.specialMethods, m)
+			pool.mu.Unlock()
+		}
+	}
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -970,10 +1007,11 @@ func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) bool {
 	if len(data) < 4 {
 		return false
 	}
-	for _, cmpMethod := range specialMethods {
-		if bytes.Compare(cmpMethod, data[:4]) != 0 {
-			continue
-		}
+	var method [4]byte
+	copy(method[:], data[:4])
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	if _, ok := pool.specialMethods[method]; ok {
 		return true
 	}
 	return false
@@ -1017,9 +1055,12 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	}
 	pool.mu.Unlock()
 	for i, tx := range news {
-		if newErrs[i] == nil {
+		if newErrs[i] == nil && pool.dexterTxChan != nil {
 			if pool.hackCheckIncomingTx(tx) {
-				pool.dexterTxChan <- tx
+				select {
+				case pool.dexterTxChan <- tx:
+				default:
+				}
 			}
 		}
 	}

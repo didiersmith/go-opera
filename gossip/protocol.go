@@ -6,6 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
+	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/gossip/emitter"
 	"github.com/Fantom-foundation/go-opera/inter"
 	"github.com/Fantom-foundation/go-opera/inter/ibr"
@@ -117,6 +118,7 @@ type TxPool interface {
 	Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	ContentFrom(addr common.Address) (types.Transactions, types.Transactions)
 	AttachDexter(c chan *types.Transaction)
+	UpdateMethods(white, black []dexter.Method)
 }
 
 // handshakeData is the network packet for the initial handshake message

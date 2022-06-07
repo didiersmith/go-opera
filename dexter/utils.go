@@ -1,6 +1,9 @@
 package dexter
 
-import "math/big"
+import (
+	"math/big"
+	"strconv"
+)
 
 func BigIntToFloat(x *big.Int) float64 {
 	if x == nil {
@@ -18,6 +21,16 @@ func FloatToBigInt(f float64) *big.Int {
 func StringToBigInt(s string) *big.Int {
 	y, _ := new(big.Int).SetString(s, 10)
 	return y
+}
+
+func Atob(s string) byte {
+	i, _ := strconv.Atoi(s)
+	return byte(i)
+}
+
+func Atoi(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
 }
 
 // P1LN = (2*a^2*d*(d+c)^2)
