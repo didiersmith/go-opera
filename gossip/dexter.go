@@ -233,36 +233,35 @@ func NewDexter(svc *Service) *Dexter {
 	}
 	d.strategies = []dexter.Strategy{
 
-		dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
-			RoutesFileName:          root + "route_caches/solidly_routes_len2-4.json",
-			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
+		dexter.NewLinearStrategy("Linear 2-3", 0, d.railgunChan, dexter.LinearStrategyConfig{
+			RoutesFileName:          root + "route_caches/solidly_routes_len2-3.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-3.json",
 		}),
 
 		dexter.NewLinearStrategy("Linear sans wftm", 1, d.railgunChan, dexter.LinearStrategyConfig{
-			RoutesFileName:          root + "route_caches/solidly_routes_no_wftm_2-4.json",
-			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_no_wftm_2-4.json",
+			RoutesFileName:          root + "route_caches/solidly_routes_no_wftm_2-3.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_no_wftm_2-3.json",
+		}),
+
+		dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
 		}),
 
 		// dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
-		// 	RoutesFileName:          root + "route_cache_routes_len2-4.json",
-		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_len2-4.json",
+		// 	RoutesFileName:          root + "route_caches/solidly_routes_len2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
 		// }),
 
 		// dexter.NewLinearStrategy("Linear sans wftm", 1, d.railgunChan, dexter.LinearStrategyConfig{
-		// 	RoutesFileName:          root + "route_cache_routes_no_wftm_2-4.json",
-		// 	PoolToRouteIdxsFileName: root + "route_cache_pairToRouteIdxs_no_wftm_2-4.json",
+		// 	RoutesFileName:          root + "route_caches/solidly_routes_no_wftm_2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_no_wftm_2-4.json",
 		// }),
 
-		dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-			RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
-			PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
-		}),
-
-		// dexter.NewBalancerLinearStrategy("Balancer Linear", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-		// 	RoutesFileName:          root + "balancer_cache_routes_len2-4.json",
-		// 	PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2-4.json",
+		// dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+		// 	RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
+		// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 		// }),
-
 		//
 	}
 	d.strategyBravado = make([]float64, len(d.strategies))
@@ -1129,7 +1128,8 @@ func (d *Dexter) watchEvents() {
 					if err != nil {
 						log.Error("Could not get effective gas tip", "tx", tx, "err", err)
 					}
-					log.Info("TX in event block", "t", tx.Type(), "price", tx.GasPrice(), "eGasTip", effectiveGasTip, "tipCap", tx.GasTipCap(), "feeCap", tx.GasFeeCap(), "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
+					from, _ := types.Sender(d.signer, tx)
+					log.Info("TX in event block", "gasTip", effectiveGasTip, "size", tx.Size(), "from", from, "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
 				}
 			}
 			if lowestGas != 0 && len(e.Txs()) > 1 {

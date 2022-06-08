@@ -1354,11 +1354,9 @@ func (h *handler) decideBroadcastAggressiveness(size int, passed time.Duration, 
 	if cfg.ThroughputImportance != 0 {
 		latencyVsThroughputTradeoff = (cfg.LatencyImportance * percents) / cfg.ThroughputImportance
 	}
-
 	broadcastCost := passed * time.Duration(128+size) / 128
 	broadcastAllCostTarget := time.Duration(latencyVsThroughputTradeoff) * (700 * time.Millisecond) / time.Duration(percents)
 	broadcastSqrtCostTarget := broadcastAllCostTarget * 10
-
 	fullRecipients := 0
 	if latencyVsThroughputTradeoff >= maxPercents {
 		// edge case
@@ -1379,6 +1377,41 @@ func (h *handler) decideBroadcastAggressiveness(size int, passed time.Duration, 
 	if fullRecipients > peersNum {
 		fullRecipients = peersNum
 	}
+	return fullRecipients
+}
+
+func (h *handler) decideBroadcastAggressivenessDebug(size int, passed time.Duration, peersNum int) int {
+	percents := 100
+	maxPercents := 1000000 * percents
+	latencyVsThroughputTradeoff := maxPercents
+	cfg := h.config.Protocol
+	if cfg.ThroughputImportance != 0 {
+		latencyVsThroughputTradeoff = (cfg.LatencyImportance * percents) / cfg.ThroughputImportance
+	}
+	broadcastCost := passed * time.Duration(128+size) / 128
+	broadcastAllCostTarget := time.Duration(latencyVsThroughputTradeoff) * (700 * time.Millisecond) / time.Duration(percents)
+	broadcastSqrtCostTarget := broadcastAllCostTarget * 10
+	fullRecipients := 0
+	if latencyVsThroughputTradeoff >= maxPercents {
+		// edge case
+		fullRecipients = peersNum
+	} else if latencyVsThroughputTradeoff <= 0 {
+		// edge case
+		fullRecipients = 0
+	} else if broadcastCost <= broadcastAllCostTarget {
+		// if event is small or was created recently, always send to everyone full event
+		fullRecipients = peersNum
+	} else if broadcastCost <= broadcastSqrtCostTarget || passed == 0 {
+		// if event is big but was created recently, send full event to subset of peers
+		fullRecipients = int(math.Sqrt(float64(peersNum)))
+		if fullRecipients < 4 {
+			fullRecipients = 4
+		}
+	}
+	if fullRecipients > peersNum {
+		fullRecipients = peersNum
+	}
+	log.Info("decideBroadcastAggressivenessDebug", "size", size, "broadcastCost", broadcastCost, "broadcastAllCostTarget", broadcastAllCostTarget, "broadcastSqrtCostTarget", broadcastSqrtCostTarget, "latencyVsThroughputTradeoff", latencyVsThroughputTradeoff)
 	return fullRecipients
 }
 
@@ -1494,7 +1527,8 @@ func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
 	for _, tx := range txs {
 		totalSize += tx.Size()
 	}
-	// log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
+	h.decideBroadcastAggressivenessDebug(int(totalSize), time.Second, 1)
+	log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
 	for _, peer := range peers {
 		peer.AsyncSendTransactions(txs, peer.fastQueue)
 	}
