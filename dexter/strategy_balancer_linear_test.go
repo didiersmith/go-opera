@@ -10,6 +10,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	SpookyWftmBtc           = common.HexToAddress("0xfdb9ab8b9513ad9e419cf19530fee49d412c3ee3")
+	SpookyWftmUsdc          = common.HexToAddress("0x2b4c76d0dc16be1c31d4c1dc53bf9b45987fc75c")
+	ALateQuartet            = common.HexToAddress("0xf3a602d30dcb723a74a0198313a7551feaca7dac")
+	OneGodBetweenTwoStables = common.HexToAddress("0x8b858eaf095a7337de6f9bc212993338773ca34e")
+)
+
 func TestBalancerLinearStrategy(t *testing.T) {
 	fmt.Println("Testing strategy_balancer_linear.go")
 	logger.SetTestMode(t)
@@ -18,20 +25,240 @@ func TestBalancerLinearStrategy(t *testing.T) {
 	root := "/home/ubuntu/dexter/carb/"
 	s := NewBalancerLinearStrategy(
 		"Balancer Linear", 0, nil, BalancerLinearStrategyConfig{
-			RoutesFileName:          root + "balancer_cache_routes_len2.json",
-			PoolToRouteIdxsFileName: root + "balancer_cache_poolToRouteIdxs_len2.json",
+			RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
+			PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
 		})
+	// s := NewBalancerLinearStrategy(
+	// 	"Balancer Linear", 0, nil, BalancerLinearStrategyConfig{
+	// 		RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
+	// 		PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
+	// 	})
 	b := s.(*BalancerLinearStrategy)
 
 	t.Run("Intialize", func(t *testing.T) {
 		assert := assert.New(t)
 		assert.Equal(b.Name, "Balancer Linear", "Wrong name")
 		assert.Equal(b.ID, 0, "Wrong ID")
-		assert.Equal(b.cfg.RoutesFileName, root+"balancer_cache_routes_len2.json", "Wrong ID")
-		assert.Equal(b.cfg.PoolToRouteIdxsFileName, root+"balancer_cache_poolToRouteIdxs_len2.json", "Wrong ID")
+		assert.Equal(b.cfg.RoutesFileName, root+"route_caches/solidly_balancer_routes_len2-3.json", "Wrong ID")
+		assert.Equal(b.cfg.PoolToRouteIdxsFileName, root+"route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json", "Wrong ID")
 		assert.Equal(b.cfg.SelectSecondBest, false, "Wrong ID")
 		assert.Equal(len(b.subStrategies), 0, "Wrong subStrategies")
 	})
+
+	t.Run("loadJson", func(t *testing.T) {
+		assert := assert.New(t)
+		assert.Greater(len(b.interestedPools), 0, "No intereseted pools")
+		assert.Greater(len(b.routeCache.Routes), 0, "No routes in routeCache")
+		assert.Greater(len(b.routeCache.PoolToRouteIdxs), 0, "No poolToRouteIdxs in routeCache")
+	})
+
+	// 	t.Run("SetPoolsInfo", func(t *testing.T) {
+	// 		// Fees and tokens for uniswap pools
+	// 		poolsInfo := make(map[common.Address]*PoolInfo)
+	// 		edgePools := make(map[EdgeKey][]common.Address)
+	// 		poolsFileName := root + "pairs.json"
+	// 		poolsFile, err := os.Open(poolsFileName)
+	// 		assert.Nil(t, err)
+	// 		defer poolsFile.Close()
+	// 		poolsBytes, _ := ioutil.ReadAll(poolsFile)
+	// 		var jsonPools []PoolInfoJson
+	// 		json.Unmarshal(poolsBytes, &jsonPools)
+	// 		for _, jsonPool := range jsonPools {
+	// 			poolAddr := common.HexToAddress(jsonPool.Addr)
+	// 			poolInfo := &PoolInfo{
+	// 				FeeNumerator: big.NewInt(jsonPool.FeeNumerator),
+	// 				Reserves:     make(map[common.Address]*big.Int),
+	// 				Tokens: []common.Address{
+	// 					common.HexToAddress(jsonPool.Token0),
+	// 					common.HexToAddress(jsonPool.Token1),
+	// 				},
+	// 				Type: UniswapV2Pair,
+	// 			}
+	// 			poolsInfo[poolAddr] = poolInfo
+	// 			edgeKey := MakeEdgeKey(poolInfo.Tokens[0], poolInfo.Tokens[1])
+	// 			if pools, ok := edgePools[edgeKey]; ok {
+	// 				edgePools[edgeKey] = append(pools, poolAddr)
+	// 			} else {
+	// 				edgePools[edgeKey] = []common.Address{poolAddr}
+	// 			}
+	// 		}
+	// 		fmt.Println("\tSetPoolsInfo: \t\t Loaded pools")
+
+	// 		// Reserves for uniswap pools
+	// 		reservesFileName := root + "data/pair_reserves.json"
+	// 		reservesFile, err := os.Open(reservesFileName)
+	// 		assert.Nil(t, err)
+	// 		defer reservesFile.Close()
+	// 		reservesBytes, _ := ioutil.ReadAll(reservesFile)
+	// 		jsonReserves := make(map[string]map[string]string)
+	// 		err = json.Unmarshal(reservesBytes, &jsonReserves)
+	// 		assert.Nil(t, err)
+	// 		for pairAddrHex, reserves := range jsonReserves {
+	// 			pairAddr := common.HexToAddress(pairAddrHex)
+	// 			for tokAddrHex, reservesStr := range reserves {
+	// 				tokAddr := common.HexToAddress(tokAddrHex)
+	// 				poolsInfo[pairAddr].Reserves[tokAddr] = StringToBigInt(reservesStr)
+	// 			}
+	// 		}
+	// 		fmt.Printf("Spooky wftm btc: %v\n", poolsInfo[SpookyWftmBtc])
+	// 		fmt.Printf("Spooky wftm usdc: %v\n", poolsInfo[SpookyWftmUsdc])
+	// 		fmt.Println("\tSetPoolsInfo: \t\tPASS")
+
+	// 		// Balancer pools
+	// 		balPoolsFileName := root + "data/beets_formatted.json"
+	// 		balPoolsFile, err := os.Open(balPoolsFileName)
+	// 		assert.Nil(t, err)
+	// 		defer balPoolsFile.Close()
+	// 		balPoolsBytes, _ := ioutil.ReadAll(balPoolsFile)
+	// 		jsonBalPools := make(map[string]map[string][]BalancerPoolJson)
+	// 		fmt.Println("Unmarshalling")
+	// 		err = json.Unmarshal(balPoolsBytes, &jsonBalPools)
+	// 		assert.Nil(t, err)
+	// 		data := jsonBalPools["data"]
+	// 		pools := data["pools"]
+	// 		for _, pool := range pools {
+	// 			var pt PoolType
+	// 			if pool.PoolType == "Weighted" {
+	// 				pt = BalancerWeightedPool
+	// 			} else if pool.PoolType == "Stable" {
+	// 				pt = BalancerStablePool
+	// 			} else {
+	// 				continue
+	// 			}
+	// 			address := common.HexToAddress(pool.Address)
+	// 			swapFee, err := strconv.ParseFloat(pool.SwapFee, 10)
+	// 			poolInfo := &PoolInfo{
+	// 				Fee:          FloatToBigInt(swapFee * 1e18),
+	// 				Reserves:     make(map[common.Address]*big.Int),
+	// 				Weights:      make(map[common.Address]*big.Int),
+	// 				ScaleFactors: make(map[common.Address]*big.Int),
+	// 				Tokens:       make([]common.Address, len(pool.Tokens)),
+	// 				LastUpdate:   time.Now(),
+	// 				Type:         pt,
+	// 			}
+	// 			amp, err := strconv.ParseFloat(pool.Amp, 10)
+	// 			if err == nil {
+	// 				poolInfo.AmplificationParam = FloatToBigInt(amp * 1e18)
+	// 			}
+	// 			for i, tok := range pool.Tokens {
+	// 				tokAddr := common.HexToAddress(tok.Address)
+	// 				poolInfo.Tokens[i] = tokAddr
+	// 				decimalsDiff := int64(18 - tok.Decimals)
+	// 				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+	// 				poolInfo.ScaleFactors[tokAddr] = scaleFactor
+	// 				if tok.Weight != "" {
+	// 					weightFloat, err := strconv.ParseFloat(tok.Weight, 10)
+	// 					assert.Nil(t, err)
+	// 					poolInfo.Weights[tokAddr] = big.NewInt(int64(weightFloat * 1e18))
+	// 				}
+	// 				balance, _ := strconv.ParseFloat(tok.Balance, 10)
+	// 				balance *= math.Pow(10, float64(tok.Decimals))
+	// 				poolInfo.Reserves[tokAddr] = FloatToBigInt(balance)
+
+	// 			}
+	// 			poolsInfo[address] = poolInfo
+	// 		}
+	// 		fmt.Printf("ALateQuartet: %v\n", poolsInfo[ALateQuartet])
+	// 		fmt.Printf("OneGodBetweenTwoStables: %v\n", poolsInfo[OneGodBetweenTwoStables])
+	// 		b.SetPoolsInfo(poolsInfo)
+	// 		b.SetEdgePools(edgePools)
+	// 		b.aggregatePools = makeAggregatePoolsFloat(b.edgePools, b.poolsInfo, nil)
+	// 		for i := 0; i < len(ScoreTiers); i++ {
+	// 			b.routeCache.Scores[i] = b.makeScores(ScoreTiers[i])
+	// 			for idx, score := range b.routeCache.Scores[i] {
+	// 				if math.IsNaN(score) {
+	// 					fmt.Printf("NaN score: %d\n", idx)
+	// 					b.getRouteAmountOutBalancer(b.routeCache.Routes[idx], 1e18, nil, true)
+	// 					break
+	// 				}
+	// 			}
+	// 		}
+	// 		// fmt.Printf("Scores: %v", b.routeCache.Scores)
+	// 		fmt.Println("\tSetPoolsInfo: \t\tPASS")
+	// 	})
+
+	// 	t.Run("bench", func(t *testing.T) {
+	// 		assert := assert.New(t)
+	// 		for i := 0; i < 1; i++ {
+	// 			start := time.Now()
+	// 			updates := []PoolUpdate{
+	// 				PoolUpdate{
+	// 					Addr: SpookyWftmBtc,
+	// 					Reserves: map[common.Address]*big.Int{
+	// 						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("10772184364004447628497336"),
+	// 						common.HexToAddress("0x321162Cd933E2Be498Cd2267a90534A804051b11"): StringToBigInt("11600000000"),
+	// 					},
+	// 				},
+	// 				PoolUpdate{
+	// 					Addr: SpookyWftmUsdc,
+	// 					Reserves: map[common.Address]*big.Int{
+	// 						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("60565680072230427474078345"),
+	// 						common.HexToAddress("0x04068da6c83afcfa0e13ba15a6696662335d5b75"): StringToBigInt("19300000000000"),
+	// 					},
+	// 				},
+	// 			}
+	// 			poolsInfoOverride, updatedKeys := b.makeUpdates(updates)
+	// 			fmt.Printf("Made updates after %s, keys %d\n", utils.PrettyDuration(time.Now().Sub(start)), len(updatedKeys))
+	// 			var pop Population
+	// 			candidateRoutes := 0
+	// 			maxScoreTier := len(ScoreTiers)
+	// 			for _, key := range updatedKeys {
+	// 				stepStart := time.Now()
+	// 				var keyPop Population
+	// 				keyPop, maxScoreTier = b.getProfitableRoutes(key, poolsInfoOverride, time.Duration(0), maxScoreTier)
+	// 				pop = append(pop, keyPop...)
+	// 				fmt.Printf("getProfitableRoutes completed after %s %s, returned %d/%d, maxScoreTier %d\n",
+	// 					utils.PrettyDuration(time.Now().Sub(stepStart)),
+	// 					utils.PrettyDuration(time.Now().Sub(start)),
+	// 					len(keyPop),
+	// 					len(b.routeCache.PoolToRouteIdxs[key][0]),
+	// 					maxScoreTier,
+	// 				)
+	// 				// pop[:10].Print()
+	// 				candidateRoutes += len(b.routeCache.PoolToRouteIdxs[key][0])
+	// 			}
+	// 			fmt.Printf("Computed candidate routes after %s, len %d/%d\n", utils.PrettyDuration(time.Now().Sub(start)), len(pop), candidateRoutes)
+	// 			plan := b.getMostProfitablePath(pop, poolsInfoOverride, FloatToBigInt(1e10))
+	// 			assert.NotNil(t, plan)
+	// 			fmt.Printf("Made plan after %s, route %d, profit %f\n\n", utils.PrettyDuration(time.Now().Sub(start)),
+	// 				plan.RouteIdx, BigIntToFloat(plan.NetProfit)/1e18)
+	// 			assert.Greater(BigIntToFloat(plan.NetProfit)/1e18, 49000.0)
+	// 		}
+	// 	})
+
+	// 	t.Run("bench 2", func(t *testing.T) {
+	// 		for i := 0; i < 1; i++ {
+	// 			start := time.Now()
+	// 			updates := []PoolUpdate{
+	// 				PoolUpdate{
+	// 					Addr: SpookyWftmUsdc,
+	// 					Reserves: map[common.Address]*big.Int{
+	// 						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("60565680072230427474078345"),
+	// 						common.HexToAddress("0x04068da6c83afcfa0e13ba15a6696662335d5b75"): StringToBigInt("19300000000000"),
+	// 					},
+	// 				},
+	// 			}
+	// 			poolsInfoOverride, updatedKeys := b.makeUpdates(updates)
+	// 			var pop Population
+	// 			maxScoreTier := len(ScoreTiers)
+	// 			for _, key := range updatedKeys {
+	// 				// stepStart := time.Now()
+	// 				var keyPop Population
+	// 				keyPop, maxScoreTier = b.getProfitableRoutes(key, poolsInfoOverride, time.Duration(0), maxScoreTier)
+	// 				pop = append(pop, keyPop...)
+	// 			}
+	// 			for i, c := range pop {
+	// 				if c.ContinuousGene < 0 {
+	// 					fmt.Printf("Negative continuous gene, %d, %f", i, c.ContinuousGene)
+	// 				}
+	// 			}
+	// 			plan := b.getMostProfitablePath(pop, poolsInfoOverride, FloatToBigInt(1e10))
+	// 			fmt.Printf("Made plan after %s, route %d, profit %f\n", utils.PrettyDuration(time.Now().Sub(start)),
+	// 				plan.RouteIdx, BigIntToFloat(plan.NetProfit)/1e18)
+	// 			assert := assert.New(t)
+	// 			assert.Greater(BigIntToFloat(plan.NetProfit)/1e18, 49000.0)
+	// 		}
+	// 	})
 
 	t.Run("invariant", func(t *testing.T) {
 		assert := assert.New(t)
@@ -118,163 +345,6 @@ func TestBalancerLinearStrategy(t *testing.T) {
 		if assert.InDelta(expectedOut, amountOut, 1e-3) {
 			fmt.Println("\tamountOut: \t\tPASS")
 		}
-	})
-
-	t.Run("getAmountOut 2pool", func(t *testing.T) {
-		assert := assert.New(t)
-		var amountIn float64 = 1e5
-		amp := 450000.
-		fee := 0.0004
-		balances := map[common.Address]float64{
-			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1.9925923435242e25,
-			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 21281812932357733710418873.000,
-		}
-		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-		amountOut := getAmountOutBalancerStable(
-			amountIn, fee, amp, balances, tokenIn, tokenOut, math.Pow(10, 12), 1)
-		var expectedOut float64 = 99974618210288880.
-		// fmt.Printf("amountOut: %v\n", amountOut)
-		if assert.InDelta(expectedOut, amountOut, 1e10) {
-			fmt.Println("\tamountOut - curve 2pool: \t\tPASS")
-		}
-	})
-
-	t.Run("getAmountOut 2pool", func(t *testing.T) {
-		assert := assert.New(t)
-		var amountIn float64 = 1e5
-		amp := 450000.
-		fee := 0.0004
-		balances := map[common.Address]float64{
-			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18310134618553000000000000.0,
-			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246307080429008537424351.0,
-		}
-		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-		amountOut := getAmountOutBalancerStable(
-			amountIn, fee, amp, balances, tokenIn, tokenOut, math.Pow(10, 12), 1)
-		var expectedOut float64 = 100014180546366086.
-		// fmt.Printf("amountOut: %v\n", amountOut)
-		if assert.InDelta(expectedOut, amountOut, 1e10) {
-			fmt.Println("\tamountOut - curve 2pool: \t\tPASS")
-		}
-	})
-
-	t.Run("getAmountOut FRAX2pool", func(t *testing.T) {
-		assert := assert.New(t)
-		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-			Fee:                4e-4,
-			AmplificationParam: 2e5,
-			Reserves: map[common.Address]float64{
-				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
-				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26533451786919290911841471.0,
-			},
-		}
-		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-			Fee:                4e-4,
-			AmplificationParam: 45e4,
-			Tokens: []common.Address{
-				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-			},
-			Reserves: map[common.Address]float64{
-				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18310134618553000000000000.0,
-				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246307080429008537424351.0,
-			},
-			MetaTokenSupply: 41018100462201771561650475.,
-		}
-		underlyingBals := map[common.Address]float64{
-			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
-			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11844303362082000000000000.0,
-			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 15037372408487387024159281.0,
-		}
-		scaleIn := 1e12
-		scaleOut := 1.
-		var amountIn float64 = 1e5
-		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-		var expectedOut float64 = 100014180546366086.
-		// fmt.Printf("amountOut: %v\n", amountOut)
-		if assert.InDelta(expectedOut, amountOut, 1e10) {
-			fmt.Println("\tamountOut - FRAX2pool (underlying): \tPASS")
-		}
-	})
-
-	t.Run("getAmountOut FRAX2pool - 2", func(t *testing.T) {
-		assert := assert.New(t)
-		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-			Fee:                4e-4,
-			AmplificationParam: 2e5,
-			Reserves: map[common.Address]float64{
-				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
-			},
-		}
-		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-			Fee:                4e-4,
-			AmplificationParam: 45e4,
-			Tokens: []common.Address{
-				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-			},
-			Reserves: map[common.Address]float64{
-				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
-				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
-			},
-			MetaTokenSupply: 41018100462201771561650475.,
-		}
-		underlyingBals := map[common.Address]float64{
-			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11803949048182000000000000.0,
-			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 15072343064214425610102325.0,
-		}
-		scaleIn := 1.
-		scaleOut := 1.
-		var amountIn float64 = 1e18
-		tokenIn := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
-		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-		var expectedOut float64 = 997368620992964518.
-		// fmt.Printf("amountOut: %v\n", amountOut)
-		if assert.InDelta(expectedOut, amountOut, 1e10) {
-			fmt.Println("\tamountOut - FRAX2pool (underlying): \t\tPASS")
-		}
-	})
-
-	// t.Run("getAmountOut FraxTUSD 4pool", func(t *testing.T) {
-	// 	assert := assert.New(t)
-	// 	var amountIn float64 = 1e5
-	// 	amp := 400000.
-	// 	fee := 0.0008
-	// 	balances := map[common.Address]float64{
-	// 		common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 7.2812862275e25,
-	// 		common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 68707939965950040078826.000,
-	// 		common.HexToAddress("0x9879aBDea01a879644185341F7aF7d8343556B7a"): 137606709693263190934363.000,
-	// 		common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 139270205990166539790318.000,
-	// 	}
-	// 	tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-	// 	tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-	// 	amountOut := getAmountOutBalancerStable(
-	// 		amountIn, fee, amp, balances, tokenIn, tokenOut, math.Pow(10, 12), 1)
-	// 	var expectedOut float64 = 99893378459147657.
-	// 	// fmt.Printf("amountOut: %v\n", amountOut)
-	// 	if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 		fmt.Println("\tamountOut - curve 2pool: \t\tPASS")
-	// 	}
-	// })
-
-	t.Run("loadJson", func(t *testing.T) {
-		assert := assert.New(t)
-		assert.Greater(len(b.interestedPools), 0, "No intereseted pools")
-		assert.Greater(len(b.routeCache.Routes), 0, "No routes in routeCache")
-		assert.Greater(len(b.routeCache.PoolToRouteIdxs), 0, "No poolToRouteIdxs in routeCache")
 	})
 
 	// 	t.Run("getAmountOut", func(t *testing.T) {

@@ -117,7 +117,8 @@ type TxPool interface {
 	Stats() (int, int)
 	Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	ContentFrom(addr common.Address) (types.Transactions, types.Transactions)
-	AttachDexter(c chan *types.Transaction)
+	NumFrom(addr common.Address) int
+	AttachDexter(c chan *types.Transaction, f chan common.Address)
 	UpdateMethods(white, black []dexter.Method)
 }
 

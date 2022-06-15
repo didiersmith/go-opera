@@ -28,14 +28,15 @@ type LinearStrategy struct {
 	ID                  int
 	RailgunChan         chan *RailgunPacket
 	inPossibleTxsChan   chan *PossibleTx
-	inPermUpdatesChan   chan []*PoolUpdate
+	inStateUpdatesChan  chan StateUpdate
 	cfg                 LinearStrategyConfig
 	poolsInfo           map[common.Address]*PoolInfoFloat
+	poolsInfoPending    map[common.Address]*PoolInfoFloat
 	poolsInfoUpdateChan chan *PoolsInfoUpdateFloat
 	interestedPairs     map[common.Address]PoolType
 	edgePools           map[EdgeKey][]common.Address
 	aggregatePools      map[EdgeKey]*PoolInfoFloat
-	routeCache          RouteCache
+	routeCache          MultiScoreRouteCache
 	subStrategies       []Strategy
 	gasPrice            int64
 	mu                  sync.RWMutex
@@ -53,9 +54,10 @@ func NewLinearStrategy(name string, id int, railgun chan *RailgunPacket, cfg Lin
 		ID:                  id,
 		RailgunChan:         railgun,
 		inPossibleTxsChan:   make(chan *PossibleTx, 256),
-		inPermUpdatesChan:   make(chan []*PoolUpdate, 256),
+		inStateUpdatesChan:  make(chan StateUpdate, 256),
 		cfg:                 cfg,
 		poolsInfo:           make(map[common.Address]*PoolInfoFloat),
+		poolsInfoPending:    make(map[common.Address]*PoolInfoFloat),
 		poolsInfoUpdateChan: make(chan *PoolsInfoUpdateFloat, 32),
 		interestedPairs:     make(map[common.Address]PoolType),
 		aggregatePools:      make(map[EdgeKey]*PoolInfoFloat),
@@ -91,11 +93,14 @@ func (s *LinearStrategy) SetGasPrice(gasPrice int64) {
 }
 
 func (s *LinearStrategy) ProcessPossibleTx(t *PossibleTx) {
-	s.inPossibleTxsChan <- t
+	select {
+	case s.inPossibleTxsChan <- t:
+	default:
+	}
 }
 
-func (s *LinearStrategy) ProcessPermUpdates(us []*PoolUpdate) {
-	s.inPermUpdatesChan <- us
+func (s *LinearStrategy) ProcessStateUpdates(u StateUpdate) {
+	s.inStateUpdatesChan <- u
 }
 
 func (s *LinearStrategy) GetInterestedPools() (map[common.Address]PoolType, map[BalPoolId]PoolType) {
@@ -107,12 +112,13 @@ func (s *LinearStrategy) AddSubStrategy(sub Strategy) {
 }
 
 func (s *LinearStrategy) Start() {
-	s.aggregatePools = makeAggregatePoolsFloat(s.edgePools, s.poolsInfo, nil)
-	s.routeCache.Scores = s.makeScores()
-	log.Info("Scores", "head", s.routeCache.Scores[:10], "tail", s.routeCache.Scores[len(s.routeCache.Scores)-10:])
+	s.aggregatePools = makeAggregatePoolsFloat(s.edgePools, s.poolsInfo, nil, nil)
+	for i := 0; i < len(ScoreTiers); i++ {
+		s.routeCache.Scores[i] = s.makeScores(ScoreTiers[i])
+	}
 	fromToken := common.HexToAddress("0x04068da6c83afcfa0e13ba15a6696662335d5b75")
 	log.Info("1 usdc -> wftm", "amount", convertFloat(fromToken, wftm, 1e6, s.aggregatePools))
-	go s.runPermUpdater()
+	go s.runStateUpdater()
 	go s.runStrategy()
 }
 
@@ -139,12 +145,15 @@ func (s *LinearStrategy) loadJson() {
 	json.Unmarshal(routeCachePoolToRouteIdxsBytes, &(routeCacheJson.PoolToRouteIdxs))
 	log.Info("Loaded poolToRouteIdxs", "len", len(routeCacheJson.PoolToRouteIdxs))
 
-	routeCache := RouteCache{
+	routeCache := MultiScoreRouteCache{
 		Routes:          make([][]*Leg, len(routeCacheJson.Routes)),
-		PoolToRouteIdxs: make(map[PoolKey][]uint),
+		PoolToRouteIdxs: make(map[PoolKey][][]uint),
+		Scores:          make([][]float64, len(ScoreTiers)),
+		LastFiredTime:   make([]time.Time, len(routeCacheJson.Routes)),
 	}
 	for i, routeJson := range routeCacheJson.Routes {
 		route := make([]*Leg, len(routeJson))
+		routeCache.LastFiredTime[i] = time.Now()
 		// log.Info("Route", "routeJson", routeJson)
 		for x, leg := range routeJson {
 			poolAddr := common.HexToAddress(leg.PairAddr)
@@ -165,62 +174,103 @@ func (s *LinearStrategy) loadJson() {
 	for strKey, routeIdxs := range routeCacheJson.PoolToRouteIdxs {
 		parts := strings.Split(strKey, "_")
 		key := poolKeyFromStrs(parts[0], parts[1], parts[2])
-		routeCache.PoolToRouteIdxs[key] = routeIdxs
+		routeCache.PoolToRouteIdxs[key] = make([][]uint, len(ScoreTiers))
+		routeCache.PoolToRouteIdxs[key][0] = routeIdxs
+		for i := 1; i < len(ScoreTiers); i++ {
+			routeCache.PoolToRouteIdxs[key][i] = make([]uint, len(routeIdxs))
+			copy(routeCache.PoolToRouteIdxs[key][i], routeIdxs)
+		}
 	}
 	log.Info("Processed route cache", "name", s.Name, "len(routes)", len(routeCache.Routes), "len(PoolToRouteIdxs)", len(routeCache.PoolToRouteIdxs))
 	s.routeCache = routeCache
 }
 
-func (s *LinearStrategy) runPermUpdater() {
+func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
+	s.mu.RLock()
+	poolInfo, ok := s.poolsInfo[p.Addr]
+	s.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	reserves := make(map[common.Address]float64)
+	updated := false
+	for a, r := range p.Reserves {
+		rf := BigIntToFloat(r)
+		reserves[a] = rf
+		if !updated && rf != poolInfo.Reserves[a] {
+			updated = true
+		}
+	}
+	if !updated {
+		return nil
+	}
+	return &PoolInfoFloat{
+		Reserves:       reserves,
+		Tokens:         poolInfo.Tokens,
+		FeeNumerator:   poolInfo.FeeNumerator,
+		FeeNumeratorBI: poolInfo.FeeNumeratorBI,
+		LastUpdate:     time.Now(),
+	}
+}
+
+func (s *LinearStrategy) runStateUpdater() {
 	for {
 		aggregatePoolUpdates := make(map[EdgeKey]*PoolInfoFloat)
 		poolsInfoUpdates := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoPendingUpdates := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoCombinedUpdates := make(map[common.Address]*PoolInfoFloat)
 		refreshKeys := make(map[PoolKey]struct{})
-		us := <-s.inPermUpdatesChan
-		// start := time.Now()
+		batch := StateUpdate{
+			PermUpdates:    make(map[common.Address]*PoolUpdate),
+			PendingUpdates: make(map[common.Address]*PoolUpdate),
+		}
+		u := <-s.inStateUpdatesChan
+		copyStateUpdate(&batch, &u)
 	loop:
 		for {
 			select {
-			case u2 := <-s.inPermUpdatesChan:
-				us = append(us, u2...)
+			case u2 := <-s.inStateUpdatesChan:
+				copyStateUpdate(&batch, &u2)
 			default:
 				break loop
 			}
 		}
-		for _, u := range us {
-			s.mu.RLock()
-			poolInfo, ok := s.poolsInfo[u.Addr]
-			s.mu.RUnlock()
-			if !ok {
+		for addr, update := range batch.PermUpdates {
+			poolInfo := s.makePoolInfoFloat(update)
+			if poolInfo == nil {
 				continue
 			}
-			reserves := make(map[common.Address]float64)
-			for a, r := range u.Reserves {
-				reserves[a] = BigIntToFloat(r)
-			}
-			poolsInfoUpdates[u.Addr] = &PoolInfoFloat{
-				Reserves:       reserves,
-				Tokens:         poolInfo.Tokens,
-				FeeNumerator:   poolInfo.FeeNumerator,
-				FeeNumeratorBI: poolInfo.FeeNumeratorBI,
-				LastUpdate:     time.Now(),
-			}
-			key0 := poolKeyFromAddrs(poolInfo.Tokens[0], poolInfo.Tokens[1], u.Addr)
-			key1 := poolKeyFromAddrs(poolInfo.Tokens[1], poolInfo.Tokens[0], u.Addr)
+			poolsInfoUpdates[addr] = poolInfo
+			poolsInfoCombinedUpdates[addr] = poolInfo
+			key0 := poolKeyFromAddrs(poolInfo.Tokens[0], poolInfo.Tokens[1], addr)
+			key1 := poolKeyFromAddrs(poolInfo.Tokens[1], poolInfo.Tokens[0], addr)
 			refreshKeys[key0] = struct{}{}
 			refreshKeys[key1] = struct{}{}
 			aggKey := MakeEdgeKey(poolInfo.Tokens[0], poolInfo.Tokens[1])
 			s.mu.RLock()
-			aggregatePoolUpdates[aggKey] = refreshAggregatePoolFloat(aggKey, s.edgePools[aggKey], s.poolsInfo, poolsInfoUpdates)
+			aggregatePoolUpdates[aggKey] = refreshAggregatePoolFloat(aggKey, s.edgePools[aggKey], s.poolsInfo, s.poolsInfoPending, poolsInfoUpdates)
 			s.mu.RUnlock()
 		}
-		if len(poolsInfoUpdates) > 0 {
-			update := &PoolsInfoUpdateFloat{
-				PoolsInfoUpdates: poolsInfoUpdates,
+		for addr, update := range u.PendingUpdates {
+			poolInfo := s.makePoolInfoFloat(update)
+			if poolInfo == nil {
+				continue
 			}
-			// log.Info("Linear Perm updater done computing updates", "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.inPermUpdatesChan), "name", s.Name)
+			poolsInfoPendingUpdates[addr] = poolInfo
+			poolsInfoCombinedUpdates[addr] = poolInfo
+			key0 := poolKeyFromAddrs(poolInfo.Tokens[0], poolInfo.Tokens[1], addr)
+			key1 := poolKeyFromAddrs(poolInfo.Tokens[1], poolInfo.Tokens[0], addr)
+			refreshKeys[key0] = struct{}{}
+			refreshKeys[key1] = struct{}{}
+		}
+		if len(poolsInfoUpdates) > 0 || len(poolsInfoPendingUpdates) > 0 {
+			update := &PoolsInfoUpdateFloat{
+				PoolsInfoUpdates:        poolsInfoUpdates,
+				PoolsInfoPendingUpdates: poolsInfoPendingUpdates,
+			}
+			// log.Info("Linear State updater done computing updates", "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.inStateUpdatesChan), "name", s.Name)
 			s.poolsInfoUpdateChan <- update
-			s.refreshScoresForPools(refreshKeys, poolsInfoUpdates)
+			s.refreshScoresForPools(refreshKeys, poolsInfoCombinedUpdates)
 		}
 	}
 }
@@ -230,63 +280,43 @@ func (s *LinearStrategy) runStrategy() {
 		select {
 		case update := <-s.poolsInfoUpdateChan:
 			s.mu.Lock()
-			// s.routeCache.PoolToRouteIdxs = update.PoolToRouteIdxs
 			for poolAddr, poolInfo := range update.PoolsInfoUpdates {
 				s.poolsInfo[poolAddr] = poolInfo
-				// if s.ID == 0 {
-				// 	log.Info("Received update", "poolAddr", poolAddr, "reserves", poolInfo.Reserves, "feeNumerator", poolInfo.FeeNumerator)
-				// }
+				delete(s.poolsInfoPending, poolAddr)
+			}
+			for poolAddr, poolInfo := range update.PoolsInfoPendingUpdates {
+				s.poolsInfoPending[poolAddr] = poolInfo
 			}
 			for edgeKey, poolInfo := range update.AggregatePools {
 				s.aggregatePools[edgeKey] = poolInfo
 			}
 			s.mu.Unlock()
-			// s.triggerOnBlockState(update.PoolsInfoUpdates)
 		case p := <-s.inPossibleTxsChan:
 			s.processPotentialTx(p)
 		}
 	}
 }
 
-// func (s *LinearStrategy) sortPoolToRouteIdxMap(scores []uint64) map[PoolKey][]uint {
-// 	poolToRouteIdxs := make(map[PoolKey][]uint, len(s.routeCache.PoolToRouteIdxs))
-// 	s.mu.RLock()
-// 	for poolKey, routeIdxs := range s.routeCache.PoolToRouteIdxs {
-// 		newRouteIdxs := make([]uint, len(routeIdxs))
-// 		copy(newRouteIdxs, routeIdxs)
-// 		poolToRouteIdxs[poolKey] = newRouteIdxs
-// 	}
-// 	s.mu.RUnlock()
-// 	for _, routeIdxs := range poolToRouteIdxs {
-// 		sort.Slice(routeIdxs, func(a, b int) bool {
-// 			return scores[routeIdxs[a]] > scores[routeIdxs[b]]
-// 		})
-// 	}
-// 	return poolToRouteIdxs
-// }
-
-func (s *LinearStrategy) getScore(route []*Leg, poolsInfoOverride map[common.Address]*PoolInfoFloat) float64 {
+func (s *LinearStrategy) getScore(route []*Leg, poolsInfoOverride map[common.Address]*PoolInfoFloat, amountIn float64) float64 {
 	// score := 1.0
 	// for _, leg := range route {
 	// 	s.mu.RLock()
-	// 	poolInfo := getPoolInfoFloat(s.poolsInfo, poolsInfoOverride, leg.PoolAddr)
+	// 	poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, leg.PoolAddr)
 	// 	s.mu.RUnlock()
 	// 	reserveFrom, reserveTo := poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To]
 	// 	score = score * (reserveTo * poolInfo.FeeNumerator) / (reserveFrom * 1e6)
 	// }
 	// return score
-	amountIn := convertFloat(wftm, route[0].From, startInFloat, s.aggregatePools)
+	amountIn = convertFloat(wftm, route[0].From, amountIn, s.aggregatePools)
 	amountOut := s.getRouteAmountOut(route, amountIn, poolsInfoOverride, false)
 	amountOut = convertFloat(route[0].From, wftm, amountOut, s.aggregatePools)
 	return amountOut
-	// amountOut.Div(amountOut, big.NewInt(1e6))
-	// return BigIntToFloat(amountOut)
 }
 
-func (s *LinearStrategy) makeScores() []float64 {
+func (s *LinearStrategy) makeScores(amountIn float64) []float64 {
 	scores := make([]float64, len(s.routeCache.Routes))
 	for i, route := range s.routeCache.Routes {
-		scores[i] = s.getScore(route, nil)
+		scores[i] = s.getScore(route, nil, amountIn)
 	}
 	return scores
 }
@@ -296,14 +326,16 @@ func (s *LinearStrategy) refreshScoresForPools(
 	var allRouteIdxs []uint
 	for key, _ := range keys {
 		if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
-			allRouteIdxs = append(allRouteIdxs, routeIdxs...)
+			allRouteIdxs = append(allRouteIdxs, routeIdxs[0]...)
 		}
 	}
 	sort.Slice(allRouteIdxs, func(a, b int) bool { return a < b })
 	allRouteIdxs = uniq(allRouteIdxs)
 	for _, routeIdx := range allRouteIdxs {
 		route := s.routeCache.Routes[routeIdx]
-		s.routeCache.Scores[routeIdx] = s.getScore(route, poolsInfoOverride)
+		for i := 0; i < len(ScoreTiers); i++ {
+			s.routeCache.Scores[i][routeIdx] = s.getScore(route, poolsInfoOverride, ScoreTiers[i])
+		}
 	}
 }
 
@@ -314,7 +346,7 @@ func (s *LinearStrategy) getRouteAmountOut(route []*Leg, amountIn float64, pools
 	}
 	for _, leg := range route {
 		s.mu.RLock()
-		poolInfo := getPoolInfoFloat(s.poolsInfo, poolsInfoOverride, leg.PoolAddr)
+		poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, leg.PoolAddr)
 		s.mu.RUnlock()
 		reserveFrom, reserveTo := poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To]
 		amountOut = getAmountOutUniswapFloat(amountIn, reserveFrom, reserveTo, poolInfo.FeeNumerator)
@@ -331,43 +363,31 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
 	var updatedKeys []PoolKey
 	for _, u := range ptx.Updates {
-		s.mu.RLock()
-		poolInfo, ok := s.poolsInfo[u.Addr]
-		s.mu.RUnlock()
-		if !ok {
+		poolInfo := s.makePoolInfoFloat(&u)
+		if poolInfo == nil {
 			continue
 		}
-		reserves := make(map[common.Address]float64)
-		for a, r := range u.Reserves {
-			reserves[a] = BigIntToFloat(r)
-		}
-		tokens := []common.Address{poolInfo.Tokens[0], poolInfo.Tokens[1]}
-		poolsInfoOverride[u.Addr] = &PoolInfoFloat{
-			Reserves:       reserves,
-			Tokens:         tokens,
-			FeeNumerator:   poolInfo.FeeNumerator,
-			FeeNumeratorBI: poolInfo.FeeNumeratorBI,
-		}
+		poolsInfoOverride[u.Addr] = poolInfo
 		updatedKeys = append(updatedKeys,
 			poolKeyFromAddrs(poolInfo.Tokens[0], poolInfo.Tokens[1], u.Addr),
 			poolKeyFromAddrs(poolInfo.Tokens[1], poolInfo.Tokens[0], u.Addr))
 	}
-	// log.Info("Finished processing tx", "hash", tx.Hash().Hex(), "t", utils.PrettyDuration(time.Now().Sub(start)), "updatedKeys", len(updatedKeys))
-	// for poolAddr, poolInfo := range poolsInfoOverride {
-	// 	log.Info("dexter.PoolInfo override", "poolAddr", poolAddr, "reserve0", poolInfo.reserve0, "reserve1", poolInfo.reserve1, "info", *poolInfo)
-	// }
 	var allProfitableRoutes []uint
-	candidateRoutes := 0
+	// candidateRoutes := 0
+	maxScoreTier := len(ScoreTiers)
 	for _, key := range updatedKeys {
-		profitableRoutes := s.getProfitableRoutes(key, poolsInfoOverride)
-		allProfitableRoutes = append(allProfitableRoutes, profitableRoutes...)
-		candidateRoutes += len(s.routeCache.PoolToRouteIdxs[key])
+		var keyPop []uint
+		keyPop, maxScoreTier = s.getProfitableRoutes(key, poolsInfoOverride, 4*time.Second, maxScoreTier)
+		allProfitableRoutes = append(allProfitableRoutes, keyPop...)
+		// if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
+		// 	candidateRoutes += len(routeIdxs[0])
+		// }
+		// profitableRoutes := s.getProfitableRoutes(key, poolsInfoOverride)
+		// allProfitableRoutes = append(allProfitableRoutes, profitableRoutes...)
+		// candidateRoutes += len(s.routeCache.PoolToRouteIdxs[key])
 	}
 	sort.Slice(allProfitableRoutes, func(a, b int) bool { return allProfitableRoutes[a] < allProfitableRoutes[b] })
 	allProfitableRoutes = uniq(allProfitableRoutes)
-	if len(ptx.AvoidPoolAddrs) > 0 {
-		allProfitableRoutes = s.filterRoutesAvoidPools(allProfitableRoutes, ptx.AvoidPoolAddrs)
-	}
 	// log.Info("Computed route", "strategy", s.Name, "profitable", len(allProfitableRoutes), "/", candidateRoutes, "t", utils.PrettyDuration(time.Now().Sub(start)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "size", ptx.Tx.Size(), "avoiding", len(ptx.AvoidPoolAddrs))
 	if len(allProfitableRoutes) == 0 {
 		return
@@ -376,6 +396,7 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 	if plan == nil {
 		return
 	}
+	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
 	// for i, leg := range plan.Path {
 	// 	poolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, leg.Pair)
 	// 	origPoolInfo := s.poolsInfo[leg.Pair]
@@ -427,52 +448,38 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 // 	}
 // }
 
-func (s *LinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverride map[common.Address]*PoolInfoFloat) []uint {
-	var ret []uint
-	if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
-		h := RouteIdxHeap{s.routeCache.Scores, routeIdxs}
+func (s *LinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverride map[common.Address]*PoolInfoFloat, minAge time.Duration, maxScoreTier int) ([]uint, int) {
+	var pop []uint
+	now := time.Now()
+	routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]
+	if !ok {
+		return pop, maxScoreTier
+	}
+	i := 0
+	for ; i < maxScoreTier; i++ {
+		h := RouteIdxHeap{s.routeCache.Scores[i], routeIdxs[i]}
 		heap.Init(&h)
-		// sort.Slice(routeIdxs, func(a, b int) bool {
-		// 	return s.routeCache.Scores[routeIdxs[a]] > s.routeCache.Scores[routeIdxs[b]]
-		// })
-		// for _, routeIdx := range routeIdxs {
 		for routeIdx := heap.Pop(&h).(uint); h.Len() > 0; routeIdx = heap.Pop(&h).(uint) {
+			if now.Sub(s.routeCache.LastFiredTime[routeIdx]) < minAge {
+				continue
+			}
 			route := s.routeCache.Routes[routeIdx]
-			amountIn := convertFloat(wftm, route[0].From, startInFloat, s.aggregatePools)
+			amountIn := convertFloat(wftm, route[0].From, ScoreTiers[i], s.aggregatePools)
 			amountOut := s.getRouteAmountOut(route, amountIn, poolsInfoOverride, false)
-			// if s.ID > 0 {
-			// 	log.Info("getProfitableRoutes", "Score", h.Scores[routeIdx], "amountIn", amountIn, "amountOut", amountOut)
-			// }
 			if amountOut < amountIn {
 				break
 			}
-			ret = append(ret, routeIdx)
+			pop = append(pop, routeIdx)
+		}
+		if len(pop) > 0 {
+			break
 		}
 	}
-	return ret
-}
-
-func (s *LinearStrategy) filterRoutesAvoidPools(routeIdxs []uint, avoidPools []*common.Address) []uint {
-	var filteredIdxs []uint
-	for _, routeIdx := range routeIdxs {
-		route := s.routeCache.Routes[routeIdx]
-		found := false
-		for _, leg := range route {
-			if found {
-				break
-			}
-			for _, poolAddr := range avoidPools {
-				if bytes.Compare(poolAddr.Bytes(), leg.PoolAddr.Bytes()) == 0 {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			filteredIdxs = append(filteredIdxs, routeIdx)
-		}
+	if i == maxScoreTier {
+		return pop, i
+	} else {
+		return pop, i + 1
 	}
-	return filteredIdxs
 }
 
 // TODO: Update this to make a sorted list of candidates and select the second best if cfg.SelectSecondBest
@@ -546,7 +553,7 @@ func (s *LinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netProfit fl
 
 func (s *LinearStrategy) getRouteOptimalAmountIn(route []*Leg, poolsInfoOverride map[common.Address]*PoolInfoFloat) float64 {
 	s.mu.RLock()
-	startPoolInfo := getPoolInfoFloat(s.poolsInfo, poolsInfoOverride, route[0].PoolAddr)
+	startPoolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, route[0].PoolAddr)
 	s.mu.RUnlock()
 	leftAmount, rightAmount := 0.0, 0.0
 	leftAmount = startPoolInfo.Reserves[route[0].From]
@@ -554,7 +561,7 @@ func (s *LinearStrategy) getRouteOptimalAmountIn(route []*Leg, poolsInfoOverride
 	r1 := startPoolInfo.FeeNumerator
 	for _, leg := range route[1:] {
 		s.mu.RLock()
-		poolInfo := getPoolInfoFloat(s.poolsInfo, poolsInfoOverride, leg.PoolAddr)
+		poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, leg.PoolAddr)
 		s.mu.RUnlock()
 		reserveFrom, reserveTo := poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To]
 		legFee := poolInfo.FeeNumerator

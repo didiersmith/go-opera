@@ -111,13 +111,17 @@ func rawMakeEngine(gdb *gossip.Store, cdb *abft.Store, g opera.Genesis, cfg Conf
 }
 
 func makeFlushableProducer(rawProducer kvdb.IterableDBProducer) (*flushable.SyncedPool, error) {
+	log.Info("Inside makeFlushableProducer")
 	existingDBs := rawProducer.Names()
 	err := CheckDBList(existingDBs)
 	if err != nil {
 		return nil, fmt.Errorf("malformed chainstore: %v", err)
 	}
+	log.Info("Making NewSyncedPool")
 	dbs := flushable.NewSyncedPool(rawProducer, FlushIDKey)
+	log.Info("dbs.Initialize")
 	err = dbs.Initialize(existingDBs)
+	log.Info("dbs.Initialize completed")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open existing databases: %v", err)
 	}
@@ -170,6 +174,7 @@ func makeEngine(rawProducer kvdb.IterableDBProducer, inputGenesis InputGenesis, 
 		}
 
 		// re-open dbs
+		log.Info("makeFlushableProducer")
 		dbs, err = makeFlushableProducer(rawProducer)
 		if err != nil {
 			return nil, nil, nil, nil, nil, gossip.BlockProc{}, err

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/hansel_lite"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -19,7 +20,7 @@ var (
 	startTokensInContract      = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	startTokensInContractFloat = BigIntToFloat(startTokensInContract)
 	unitIn                     = 1e19
-	inCandidates               = []float64{2e19, 1e20, 3e20, 6e20, 1e21, 5e21, 1e22, 2e22}
+	inCandidates               = []float64{1e19, 1e20, 1e21, 1e22, 1e23}
 	halfIn                     = 5e20
 	kiloIn                     = 1e21
 	MaxAmountIn                = new(big.Int).Mul(big.NewInt(2547), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
@@ -41,7 +42,8 @@ const (
 type FishCallType int
 
 const (
-	SwapSinglePath FishCallType = iota
+	SwapSinglePath   FishCallType = iota
+	HanselSwapLinear FishCallType = iota
 )
 
 type PoolType int
@@ -53,6 +55,8 @@ const (
 	SolidlyVolatilePool           = iota
 	SolidlyStablePool             = iota
 )
+
+var ScoreTiers = []float64{1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
 
 type PoolKey [60]byte
 type EdgeKey [40]byte
@@ -66,9 +70,24 @@ type PossibleTx struct {
 	ValidatorIDs   []idx.ValidatorID
 }
 
+type StateUpdate struct {
+	PermUpdates    map[common.Address]*PoolUpdate
+	PendingUpdates map[common.Address]*PoolUpdate
+}
+
+func copyStateUpdate(to, from *StateUpdate) {
+	for a, poolUpdate := range from.PermUpdates {
+		to.PermUpdates[a] = poolUpdate
+	}
+	for a, poolUpdate := range from.PendingUpdates {
+		to.PendingUpdates[a] = poolUpdate
+	}
+}
+
 type PoolUpdate struct {
 	Addr     common.Address
 	Reserves map[common.Address]*big.Int
+	Time     time.Time
 }
 
 type PoolInfo struct {
@@ -105,14 +124,15 @@ type PoolsInfoUpdate struct {
 }
 
 type PoolsInfoUpdateFloat struct {
-	PoolsInfoUpdates map[common.Address]*PoolInfoFloat
+	PoolsInfoUpdates        map[common.Address]*PoolInfoFloat
+	PoolsInfoPendingUpdates map[common.Address]*PoolInfoFloat
 	// PoolToRouteIdxs  map[PoolKey][]uint
 	AggregatePools map[EdgeKey]*PoolInfoFloat
 }
 
 type Strategy interface {
 	ProcessPossibleTx(ptx *PossibleTx)
-	ProcessPermUpdates(us []*PoolUpdate)
+	ProcessStateUpdates(u StateUpdate)
 	GetInterestedPools() (map[common.Address]PoolType, map[BalPoolId]PoolType)
 	SetPoolsInfo(poolsInfo map[common.Address]*PoolInfo)
 	SetEdgePools(edgePools map[EdgeKey][]common.Address)
@@ -130,6 +150,10 @@ type Plan struct {
 	Path      []fish5_lite.LinearSwapCommand
 	RouteIdx  uint
 	Reserves  []ReserveInfo
+}
+
+type HanselPlan struct {
+	Path []hansel_lite.Breadcrumb
 }
 
 type LegacyLegJson struct {
@@ -164,6 +188,13 @@ type RouteCache struct {
 	LastFiredTime   []time.Time
 }
 
+type MultiScoreRouteCache struct {
+	Routes          [][]*Leg
+	PoolToRouteIdxs map[PoolKey][][]uint // poolKey -> ScoreTier -> RouteIdx
+	Scores          [][]float64          // ScoreTier -> RouteIdx -> Score
+	LastFiredTime   []time.Time
+}
+
 type RouteIdxHeap struct {
 	Scores    []float64
 	RouteIdxs []uint
@@ -193,12 +224,13 @@ type Leg struct {
 }
 
 type RailgunPacket struct {
-	Type         FishCallType
-	Target       *types.Transaction
-	StrategyID   int
-	Response     *Plan
-	ValidatorIDs []idx.ValidatorID
-	StartTime    time.Time
+	Type           FishCallType
+	Target         *types.Transaction
+	StrategyID     int
+	Response       *Plan
+	HanselResponse *HanselPlan
+	ValidatorIDs   []idx.ValidatorID
+	StartTime      time.Time
 }
 
 type ReserveInfo struct {
@@ -213,6 +245,30 @@ type ReserveInfo struct {
 type AmountOutCacheKey struct {
 	PoolId   BalPoolId
 	AmountIn float64
+}
+
+type PoolInfoJson struct {
+	Addr         string `json:addr`
+	Token0       string `json:token0`
+	Token1       string `json:token1`
+	ExchangeName string `json:exchangeName`
+	FeeNumerator int64  `json:feeNumerator`
+	ExchangeType string `json:exchangeType`
+}
+
+type BalancerPoolJson struct {
+	Id       string `json:id`
+	Address  string `json:address`
+	Amp      string `json:amp`
+	SwapFee  string `json:swapFee`
+	PoolType string `json:poolType`
+	Name     string `json:name`
+	Tokens   []struct {
+		Decimals int    `json:decimals`
+		Address  string `json:address`
+		Weight   string `json:weight`
+		Balance  string `json:balance`
+	}
 }
 
 func estimateFishGasFloat(numTransfers, numSwaps int, gasPrice *big.Int) float64 {
@@ -247,7 +303,7 @@ func getAmountOutUniswapFloat(amountIn, reserveIn, reserveOut, feeNumerator floa
 	numerator := amountInWithFee * reserveOut
 	denominator := reserveIn*1e6 + amountInWithFee
 	if denominator == 0 {
-		log.Info("WARNING: getAmountOut returning 0", "reserveIn", reserveIn, "reserveOut", reserveOut, "amountIn", amountIn)
+		// log.Info("WARNING: getAmountOut returning 0", "reserveIn", reserveIn, "reserveOut", reserveOut, "amountIn", amountIn)
 		return 0
 	}
 	return numerator / denominator
@@ -273,11 +329,15 @@ func getPoolInfo(poolsInfo, poolsInfoOverride map[common.Address]*PoolInfo, pool
 	return poolInfo
 }
 
-func getPoolInfoFloat(poolsInfo, poolsInfoOverride map[common.Address]*PoolInfoFloat, poolAddr common.Address) *PoolInfoFloat {
+func getPoolInfoFloat(poolsInfo, poolsInfoPending, poolsInfoOverride map[common.Address]*PoolInfoFloat, poolAddr common.Address) *PoolInfoFloat {
 	if poolsInfoOverride != nil {
 		if poolInfo, ok := poolsInfoOverride[poolAddr]; ok {
 			return poolInfo
 		}
+	}
+	if poolInfo, ok := poolsInfoPending[poolAddr]; ok && time.Now().Sub(poolInfo.LastUpdate) < 4*time.Second {
+		// log.Info("Returning override for", "poolAddr", poolAddr, "time diff", utils.PrettyDuration(time.Now().Sub(poolInfo.LastUpdate)))
+		return poolInfo
 	}
 	poolInfo := poolsInfo[poolAddr]
 	return poolInfo
@@ -317,7 +377,7 @@ func MakeEdgeKey(a, b common.Address) (key EdgeKey) {
 	return key
 }
 
-func refreshAggregatePoolFloat(key EdgeKey, pools []common.Address, poolsInfo, poolsInfoOverride map[common.Address]*PoolInfoFloat) *PoolInfoFloat {
+func refreshAggregatePoolFloat(key EdgeKey, pools []common.Address, poolsInfo, poolsInfoPending, poolsInfoOverride map[common.Address]*PoolInfoFloat) *PoolInfoFloat {
 	token0 := common.BytesToAddress(key[:20])
 	token1 := common.BytesToAddress(key[20:])
 	agg := &PoolInfoFloat{
@@ -325,17 +385,17 @@ func refreshAggregatePoolFloat(key EdgeKey, pools []common.Address, poolsInfo, p
 		Tokens:   []common.Address{token0, token1},
 	}
 	for _, poolAddr := range pools {
-		pi := getPoolInfoFloat(poolsInfo, poolsInfoOverride, poolAddr)
+		pi := getPoolInfoFloat(poolsInfo, poolsInfoPending, poolsInfoOverride, poolAddr)
 		agg.Reserves[token0] = agg.Reserves[token0] + pi.Reserves[token0]
 		agg.Reserves[token1] = agg.Reserves[token1] + pi.Reserves[token1]
 	}
 	return agg
 }
 
-func makeAggregatePoolsFloat(edgePools map[EdgeKey][]common.Address, poolsInfo, poolsInfoOverride map[common.Address]*PoolInfoFloat) map[EdgeKey]*PoolInfoFloat {
+func makeAggregatePoolsFloat(edgePools map[EdgeKey][]common.Address, poolsInfo, poolsInfoPending, poolsInfoOverride map[common.Address]*PoolInfoFloat) map[EdgeKey]*PoolInfoFloat {
 	aggs := make(map[EdgeKey]*PoolInfoFloat)
 	for key, pools := range edgePools {
-		aggs[key] = refreshAggregatePoolFloat(key, pools, poolsInfo, poolsInfoOverride)
+		aggs[key] = refreshAggregatePoolFloat(key, pools, poolsInfo, poolsInfoPending, poolsInfoOverride)
 	}
 	return aggs
 }

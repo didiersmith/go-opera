@@ -17,6 +17,7 @@
 package evmcore
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"math/big"
@@ -123,9 +124,6 @@ var (
 	reheapTimer = metrics.GetOrRegisterTimer("txpool/reheap", nil)
 )
 
-// TxStatus is the current status of a transaction as seen by the pool.
-type TxStatus uint
-
 //Dexter
 var (
 	routers = []common.Address{
@@ -143,6 +141,10 @@ var (
 		common.HexToAddress("0xb9799De71100e20aC1cdbCc63C69ddA2D0D81710"),
 		common.HexToAddress("0xfD000ddCEa75a2E23059881c3589F6425bFf1AbB"),
 		common.HexToAddress("0xcdA8f0fB4132D977AD427d18555E0cb1b1dfA363"),
+	}
+	fishMethods = [][4]byte{
+		[4]byte{0x3f, 0xc7, 0x1f, 0x8c}, // Hansel swapLinear
+		[4]byte{0xf5, 0x19, 0x6f, 0x14}, // Fish swapLinear
 	}
 	specialMethods = [][4]byte{
 		[4]byte{10, 242, 16, 161},
@@ -202,6 +204,17 @@ var (
 	}
 	mrMillion = common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52")
 )
+
+type DexterTxInterest int
+
+const (
+	NotInterested DexterTxInterest = iota
+	PotentialTarget
+	DexterFriendlyFire
+)
+
+// TxStatus is the current status of a transaction as seen by the pool.
+type TxStatus uint
 
 const (
 	TxStatusUnknown TxStatus = iota
@@ -340,8 +353,10 @@ type TxPool struct {
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 
-	dexterTxChan   chan *types.Transaction
-	specialMethods map[[4]byte]struct{}
+	dexterTxChan           chan *types.Transaction
+	dexterFriendlyFireChan chan common.Address
+	specialMethods         map[[4]byte]struct{}
+	specialMethodsMu       sync.RWMutex
 }
 
 type txpoolResetRequest struct {
@@ -408,25 +423,26 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 	return pool
 }
 
-func (pool *TxPool) AttachDexter(c chan *types.Transaction) {
+func (pool *TxPool) AttachDexter(c chan *types.Transaction, f chan common.Address) {
 	pool.dexterTxChan = c
+	pool.dexterFriendlyFireChan = f
 }
 
 func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
 	for _, m := range white {
 		if _, ok := pool.specialMethods[m]; !ok {
 			log.Info("Adding method to whitelist", "method", m)
-			pool.mu.Lock()
+			pool.specialMethodsMu.Lock()
 			pool.specialMethods[m] = struct{}{}
-			pool.mu.Unlock()
+			pool.specialMethodsMu.Unlock()
 		}
 	}
 	for _, m := range black {
 		if _, ok := pool.specialMethods[m]; ok {
 			log.Info("Removing method from whitelist", "method", m)
-			pool.mu.Lock()
+			pool.specialMethodsMu.Lock()
 			delete(pool.specialMethods, m)
-			pool.mu.Unlock()
+			pool.specialMethodsMu.Unlock()
 		}
 	}
 }
@@ -561,8 +577,8 @@ func (pool *TxPool) SetGasPrice(price *big.Int) {
 // Nonce returns the next nonce of an account, with all transactions executable
 // by the pool already applied on top.
 func (pool *TxPool) Nonce(addr common.Address) uint64 {
-	pool.mu.RLock()
-	defer pool.mu.RUnlock()
+	// pool.mu.RLock()
+	// defer pool.mu.RUnlock()
 
 	return pool.pendingNonces.get(addr)
 }
@@ -613,6 +629,20 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 		queued[addr] = list.Flatten()
 	}
 	return pending, queued
+}
+
+func (pool *TxPool) NumFrom(addr common.Address) int {
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+
+	num := 0
+	if list, ok := pool.pending[addr]; ok {
+		num += list.Len()
+	}
+	if list, ok := pool.queue[addr]; ok {
+		num += list.Len()
+	}
+	return num
 }
 
 // ContentFrom retrieves the data content of the transaction pool, returning the
@@ -992,10 +1022,10 @@ func (pool *TxPool) AddRemote(tx *types.Transaction) error {
 	return errs[0]
 }
 
-func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) bool {
+func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) DexterTxInterest {
 	to := tx.To()
 	if to == nil {
-		return false
+		return NotInterested
 	}
 	// toBytes := to.Bytes()
 	// if bytes.Compare(mrMillion[:], toBytes) == 0 {
@@ -1005,16 +1035,22 @@ func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) bool {
 	// }
 	data := tx.Data()
 	if len(data) < 4 {
-		return false
+		return NotInterested
 	}
 	var method [4]byte
 	copy(method[:], data[:4])
-	pool.mu.RLock()
-	defer pool.mu.RUnlock()
+	pool.specialMethodsMu.RLock()
 	if _, ok := pool.specialMethods[method]; ok {
-		return true
+		pool.specialMethodsMu.RUnlock()
+		return PotentialTarget
 	}
-	return false
+	pool.specialMethodsMu.RUnlock()
+	for _, m := range fishMethods {
+		if bytes.Compare(method[:], m[:]) == 0 {
+			return DexterFriendlyFire
+		}
+	}
+	return NotInterested
 }
 
 // addTxs attempts to queue a batch of transactions if they are valid.
@@ -1046,27 +1082,35 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		return errs
 	}
 
-	// Process all the new transaction and merge any errors into the original slice
-	pool.mu.Lock()
-	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
-	var promoted []*types.Transaction
-	if local {
-		promoted = pool.hackRunReorgFast(dirtyAddrs)
-	}
-	pool.mu.Unlock()
-	for i, tx := range news {
-		if newErrs[i] == nil && pool.dexterTxChan != nil {
-			if pool.hackCheckIncomingTx(tx) {
+	for _, tx := range news {
+		if pool.dexterTxChan != nil {
+			interest := pool.hackCheckIncomingTx(tx)
+			if interest == PotentialTarget {
 				select {
 				case pool.dexterTxChan <- tx:
+				default:
+				}
+			} else if interest == DexterFriendlyFire {
+				from, _ := types.Sender(pool.signer, tx)
+				select {
+				case pool.dexterFriendlyFireChan <- from:
 				default:
 				}
 			}
 		}
 	}
-	if local {
-		pool.hackNotifyNewTxs(promoted)
-	}
+
+	// Process all the new transaction and merge any errors into the original slice
+	pool.mu.Lock()
+	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
+	// var promoted []*types.Transaction
+	// if local {
+	// 	promoted = pool.hackRunReorgFast(dirtyAddrs)
+	// }
+	pool.mu.Unlock()
+	// if local {
+	// 	pool.hackNotifyNewTxs(promoted)
+	// }
 
 	var nilSlot = 0
 	for _, err := range newErrs {

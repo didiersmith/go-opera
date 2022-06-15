@@ -182,6 +182,7 @@ func NewService(stack *node.Node, config Config, store *Store, blockProc BlockPr
 }
 
 func newService(config Config, store *Store, blockProc BlockProc, engine lachesis.Consensus, dagIndexer *vecmt.Index, newTxPool func(evmcore.StateReader) TxPool) (*Service, error) {
+	log.Info("newService")
 	svc := &Service{
 		config:             config,
 		blockProcTasksDone: make(chan struct{}),
@@ -265,7 +266,7 @@ func newService(config Config, store *Store, blockProc BlockProc, engine lachesi
 	}
 
 	svc.dexter = NewDexter(svc)
-	svc.txpool.AttachDexter(svc.dexter.inTxChan)
+	svc.txpool.AttachDexter(svc.dexter.inTxChan, svc.dexter.inFriendlyFireChan)
 	// create API backend
 	svc.EthAPI = &EthAPIBackend{config.ExtRPCEnabled, svc, stateReader, txSigner, config.AllowUnprotectedTxs}
 

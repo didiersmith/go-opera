@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -50,6 +51,7 @@ type Methodist struct {
 	events        chan MethodEvent
 	root          string
 	flushInterval time.Duration
+	mu            sync.Mutex
 }
 
 func NewMethodist(root string, flushInterval time.Duration) *Methodist {
@@ -70,10 +72,15 @@ func (m *Methodist) Record(e MethodEvent) {
 	if blacklisted {
 		return
 	}
-	m.events <- e
+	select {
+	case m.events <- e:
+	default:
+	}
 }
 
 func (m *Methodist) Interested(method Method) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_, blacklisted := blacklist[method]
 	if blacklisted {
 		return false
@@ -125,6 +132,7 @@ func (m *Methodist) Run() {
 	for {
 		select {
 		case e := <-m.events:
+			m.mu.Lock()
 			if _, ok := m.stats[e.M]; ok {
 				m.stats[e.M][e.Type]++
 			} else {
@@ -132,7 +140,9 @@ func (m *Methodist) Run() {
 				m.stats[e.M][e.Type]++
 				m.txHashes[e.M] = e.TxHash
 			}
+			m.mu.Unlock()
 		case <-interval:
+			m.mu.Lock()
 			file, err := os.OpenFile(m.root+"/data/methods.csv", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 			if err != nil {
 				log.Error("Could not open method file", "err", err)
@@ -143,6 +153,7 @@ func (m *Methodist) Run() {
 			for _, ms := range l {
 				fmt.Fprintf(file, "%v,%d,%d,%d,%d,%d,%s\n", ms.M, ms.Stats[UpdatedReserves], ms.Stats[Confirmed], ms.Stats[Pending], ms.Stats[Fired], ms.Stats[Success], m.txHashes[ms.M].Hex())
 			}
+			m.mu.Unlock()
 			file.Close()
 			interval = time.After(m.flushInterval)
 		}
@@ -187,6 +198,8 @@ func (m *Methodist) Sort() MethodStatsList {
 }
 
 func (m *Methodist) GetLists() (white []Method, black []Method) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for method, stats := range m.stats {
 		if stats[Fired] > 20 {
 			if float64(stats[Success])/float64(stats[Fired]) < 0.08 {
@@ -206,7 +219,7 @@ func (m *Methodist) GetLists() (white []Method, black []Method) {
 			}
 			continue
 		}
-		if stats[Confirmed] > 0 && float64(stats[UpdatedReserves])/float64(stats[Confirmed]) < 0.4 {
+		if stats[Confirmed] > 20 && float64(stats[UpdatedReserves])/float64(stats[Confirmed]) < 0.4 {
 			// fmt.Printf("Blacklisting due to low update rate, %v, %d/%d, %v\n", method, stats[UpdatedReserves], stats[Confirmed], stats)
 			black = append(black, method)
 		} else {

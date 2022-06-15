@@ -892,12 +892,12 @@ func (h *handler) handleTxHashes(p *peer, announces []common.Hash) {
 	interfaces := txidsToInterfaces(announces)
 	_ = h.txFetcher.NotifyAnnounces(p.id, interfaces, time.Now(), requestTransactions)
 	// Dexter: Ask other peers for TX as well.
-	for _, peer := range h.peers.GetSortedTxPeers() {
-		peerRequestTransactions := func(ids []interface{}) error {
-			return peer.RequestTransactions(interfacesToTxids(ids))
-		}
-		_ = h.txFetcher.NotifyAnnounces(peer.id, interfaces, time.Now(), peerRequestTransactions)
-	}
+	// for _, peer := range h.peers.GetSortedTxPeers() {
+	// 	peerRequestTransactions := func(ids []interface{}) error {
+	// 		return peer.RequestTransactions(interfacesToTxids(ids))
+	// 	}
+	// 	_ = h.txFetcher.NotifyAnnounces(peer.id, interfaces, time.Now(), peerRequestTransactions)
+	// }
 }
 
 // Dexter
@@ -1519,7 +1519,8 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 
 // Dexter
 func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
-	peers := h.peers.GetSortedPeers()
+	// peers := h.peers.GetSortedPeers()
+	peers := h.peers.List()
 	if len(peers) == 0 {
 		peers = h.peers.List()
 	}
@@ -1527,11 +1528,11 @@ func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
 	for _, tx := range txs {
 		totalSize += tx.Size()
 	}
-	h.decideBroadcastAggressivenessDebug(int(totalSize), time.Second, 1)
-	log.Info("Aggressive broadcasting", "peers", len(peers), "size", totalSize)
+	// h.decideBroadcastAggressivenessDebug(int(totalSize), time.Second, 1)
 	for _, peer := range peers {
 		peer.AsyncSendTransactions(txs, peer.fastQueue)
 	}
+	log.Info("Aggressive broadcasted", "peers", len(peers), "size", totalSize)
 }
 
 // Mined broadcast loop

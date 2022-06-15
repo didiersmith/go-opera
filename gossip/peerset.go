@@ -121,6 +121,19 @@ func (ps *peerSet) GetSortedTxPeers() []*peer {
 }
 
 // Dexter
+func (ps *peerSet) GetSortedIPs() []string {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	list := make([]string, 0, len(ps.sortedPeers))
+	for _, id := range ps.sortedPeers {
+		if peer, ok := ps.peers[id]; ok {
+			list = append(list, peer.Peer.RemoteAddr().String())
+		}
+	}
+	return list
+}
+
+// Dexter
 func min(a, b int) int {
 	if a < b {
 		return a
