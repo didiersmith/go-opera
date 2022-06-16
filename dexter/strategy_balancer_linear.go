@@ -688,7 +688,7 @@ func (s *BalancerLinearStrategy) makeUpdates(updates []PoolUpdate) (poolsInfoOve
 }
 
 func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
-	// start := time.Now()
+	start := time.Now()
 	poolsInfoOverride, updatedKeys := s.makeUpdates(ptx.Updates)
 	var pop Population
 	candidateRoutes := 0
@@ -712,7 +712,7 @@ func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		return
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
-	log.Info("strategy_balancer_linear final route", "strategy", s.Name, "profitable", len(pop), "/", candidateRoutes, "t", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
+	log.Info("strategy_balancer_linear final route", "strategy", s.Name, "profitable", len(pop), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
 	s.RailgunChan <- &RailgunPacket{
 		Type:         SwapSinglePath,
 		StrategyID:   s.ID,
@@ -731,6 +731,7 @@ func (s *BalancerLinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverr
 		return pop, maxScoreTier
 	}
 	i := 0
+	// outer:
 	for ; i < maxScoreTier; i++ {
 		h := RouteIdxHeap{s.routeCache.Scores[i], routeIdxs[i]}
 		heap.Init(&h)
@@ -749,21 +750,26 @@ func (s *BalancerLinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverr
 				ContinuousGene: amountIn,
 				Fitness:        convertFloat(route[0].From, wftm, amountOut-amountIn, s.aggregatePools),
 			}
-			for in := ScoreTiers[i] * 8; in < ScoreTiers[i]*1e9; in *= 8 {
-				amountIn := convertFloat(wftm, route[0].From, math.Abs(in+rand.NormFloat64()*in/4), s.aggregatePools)
-				amountOut := s.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
-				if amountOut-amountIn > bestCand.Fitness {
-					bestCand = Candidate{
-						DiscreteGene:   routeIdx,
-						ContinuousGene: amountIn,
-						Fitness:        convertFloat(route[0].From, wftm, amountOut-amountIn, s.aggregatePools),
+			if i == 0 {
+				for in := ScoreTiers[i] * 8; in < ScoreTiers[i]*1e9; in *= 8 {
+					amountIn := convertFloat(wftm, route[0].From, math.Abs(in+rand.NormFloat64()*in/4), s.aggregatePools)
+					amountOut := s.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
+					if amountOut-amountIn > bestCand.Fitness {
+						bestCand = Candidate{
+							DiscreteGene:   routeIdx,
+							ContinuousGene: amountIn,
+							Fitness:        convertFloat(route[0].From, wftm, amountOut-amountIn, s.aggregatePools),
+						}
 					}
-				}
-				if amountOut < amountIn {
-					break
+					if amountOut < amountIn {
+						break
+					}
 				}
 			}
 			pop = append(pop, bestCand)
+			// if len(pop) >= (i+1)*5 {
+			// 	break outer
+			// }
 		}
 		if len(pop) > 0 {
 			break
@@ -786,13 +792,13 @@ func (s *BalancerLinearStrategy) getMostProfitablePath(pop Population, poolsInfo
 	// 	pop[:10].Print()
 	// }
 	// log.Info("Performing evolution on population", "size", len(pop))
-	// popSize := len(pop) * 10
-	// if popSize > 1000 {
-	// 	popSize = 1000
-	// }
+	popSize := (len(pop) + 1) * 10
+	if popSize > 1000 {
+		popSize = 1000
+	}
 	// fmt.Printf("Starting with population size %d\n", popSize)
 	for i := 0; i < 5; i++ {
-		pop = NextGeneration(pop, 1000, func(c Candidate) float64 {
+		pop = NextGeneration(pop, popSize/(i+1), func(c Candidate) float64 {
 			route := s.routeCache.Routes[c.DiscreteGene]
 			amountOut := s.getRouteAmountOutBalancer(route, c.ContinuousGene, poolsInfoOverride, false)
 			return convertFloat(route[0].From, wftm, amountOut-c.ContinuousGene, s.aggregatePools)
@@ -880,9 +886,6 @@ func (s *BalancerLinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netP
 			toReserveInfo.Original = FloatToBigInt(poolInfo.Reserves[leg.To])
 			toReserveInfo.Predicted = FloatToBigInt(predictedPoolInfo.Reserves[leg.To])
 		} else {
-			if leg.Type == BalancerStablePool {
-				log.Info("Stable pool leg", "from", leg.From.Hex(), "to", leg.To.Hex(), "poolId", leg.PoolId)
-			}
 			plan.Path[i] = fish5_lite.LinearSwapCommand{
 				Token0:     leg.From,
 				Token1:     leg.To,

@@ -1,11 +1,18 @@
 package dexter
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math"
+	"math/big"
+	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Fantom-foundation/go-opera/logger"
+	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
@@ -52,179 +59,179 @@ func TestBalancerLinearStrategy(t *testing.T) {
 		assert.Greater(len(b.routeCache.PoolToRouteIdxs), 0, "No poolToRouteIdxs in routeCache")
 	})
 
-	// 	t.Run("SetPoolsInfo", func(t *testing.T) {
-	// 		// Fees and tokens for uniswap pools
-	// 		poolsInfo := make(map[common.Address]*PoolInfo)
-	// 		edgePools := make(map[EdgeKey][]common.Address)
-	// 		poolsFileName := root + "pairs.json"
-	// 		poolsFile, err := os.Open(poolsFileName)
-	// 		assert.Nil(t, err)
-	// 		defer poolsFile.Close()
-	// 		poolsBytes, _ := ioutil.ReadAll(poolsFile)
-	// 		var jsonPools []PoolInfoJson
-	// 		json.Unmarshal(poolsBytes, &jsonPools)
-	// 		for _, jsonPool := range jsonPools {
-	// 			poolAddr := common.HexToAddress(jsonPool.Addr)
-	// 			poolInfo := &PoolInfo{
-	// 				FeeNumerator: big.NewInt(jsonPool.FeeNumerator),
-	// 				Reserves:     make(map[common.Address]*big.Int),
-	// 				Tokens: []common.Address{
-	// 					common.HexToAddress(jsonPool.Token0),
-	// 					common.HexToAddress(jsonPool.Token1),
-	// 				},
-	// 				Type: UniswapV2Pair,
-	// 			}
-	// 			poolsInfo[poolAddr] = poolInfo
-	// 			edgeKey := MakeEdgeKey(poolInfo.Tokens[0], poolInfo.Tokens[1])
-	// 			if pools, ok := edgePools[edgeKey]; ok {
-	// 				edgePools[edgeKey] = append(pools, poolAddr)
-	// 			} else {
-	// 				edgePools[edgeKey] = []common.Address{poolAddr}
-	// 			}
-	// 		}
-	// 		fmt.Println("\tSetPoolsInfo: \t\t Loaded pools")
+	t.Run("SetPoolsInfo", func(t *testing.T) {
+		// Fees and tokens for uniswap pools
+		poolsInfo := make(map[common.Address]*PoolInfo)
+		edgePools := make(map[EdgeKey][]common.Address)
+		poolsFileName := root + "pairs.json"
+		poolsFile, err := os.Open(poolsFileName)
+		assert.Nil(t, err)
+		defer poolsFile.Close()
+		poolsBytes, _ := ioutil.ReadAll(poolsFile)
+		var jsonPools []PoolInfoJson
+		json.Unmarshal(poolsBytes, &jsonPools)
+		for _, jsonPool := range jsonPools {
+			poolAddr := common.HexToAddress(jsonPool.Addr)
+			poolInfo := &PoolInfo{
+				FeeNumerator: big.NewInt(jsonPool.FeeNumerator),
+				Reserves:     make(map[common.Address]*big.Int),
+				Tokens: []common.Address{
+					common.HexToAddress(jsonPool.Token0),
+					common.HexToAddress(jsonPool.Token1),
+				},
+				Type: UniswapV2Pair,
+			}
+			poolsInfo[poolAddr] = poolInfo
+			edgeKey := MakeEdgeKey(poolInfo.Tokens[0], poolInfo.Tokens[1])
+			if pools, ok := edgePools[edgeKey]; ok {
+				edgePools[edgeKey] = append(pools, poolAddr)
+			} else {
+				edgePools[edgeKey] = []common.Address{poolAddr}
+			}
+		}
+		fmt.Println("\tSetPoolsInfo: \t\t Loaded pools")
 
-	// 		// Reserves for uniswap pools
-	// 		reservesFileName := root + "data/pair_reserves.json"
-	// 		reservesFile, err := os.Open(reservesFileName)
-	// 		assert.Nil(t, err)
-	// 		defer reservesFile.Close()
-	// 		reservesBytes, _ := ioutil.ReadAll(reservesFile)
-	// 		jsonReserves := make(map[string]map[string]string)
-	// 		err = json.Unmarshal(reservesBytes, &jsonReserves)
-	// 		assert.Nil(t, err)
-	// 		for pairAddrHex, reserves := range jsonReserves {
-	// 			pairAddr := common.HexToAddress(pairAddrHex)
-	// 			for tokAddrHex, reservesStr := range reserves {
-	// 				tokAddr := common.HexToAddress(tokAddrHex)
-	// 				poolsInfo[pairAddr].Reserves[tokAddr] = StringToBigInt(reservesStr)
-	// 			}
-	// 		}
-	// 		fmt.Printf("Spooky wftm btc: %v\n", poolsInfo[SpookyWftmBtc])
-	// 		fmt.Printf("Spooky wftm usdc: %v\n", poolsInfo[SpookyWftmUsdc])
-	// 		fmt.Println("\tSetPoolsInfo: \t\tPASS")
+		// Reserves for uniswap pools
+		reservesFileName := root + "data/pair_reserves.json"
+		reservesFile, err := os.Open(reservesFileName)
+		assert.Nil(t, err)
+		defer reservesFile.Close()
+		reservesBytes, _ := ioutil.ReadAll(reservesFile)
+		jsonReserves := make(map[string]map[string]string)
+		err = json.Unmarshal(reservesBytes, &jsonReserves)
+		assert.Nil(t, err)
+		for pairAddrHex, reserves := range jsonReserves {
+			pairAddr := common.HexToAddress(pairAddrHex)
+			for tokAddrHex, reservesStr := range reserves {
+				tokAddr := common.HexToAddress(tokAddrHex)
+				poolsInfo[pairAddr].Reserves[tokAddr] = StringToBigInt(reservesStr)
+			}
+		}
+		fmt.Printf("Spooky wftm btc: %v\n", poolsInfo[SpookyWftmBtc])
+		fmt.Printf("Spooky wftm usdc: %v\n", poolsInfo[SpookyWftmUsdc])
+		fmt.Println("\tSetPoolsInfo: \t\tPASS")
 
-	// 		// Balancer pools
-	// 		balPoolsFileName := root + "data/beets_formatted.json"
-	// 		balPoolsFile, err := os.Open(balPoolsFileName)
-	// 		assert.Nil(t, err)
-	// 		defer balPoolsFile.Close()
-	// 		balPoolsBytes, _ := ioutil.ReadAll(balPoolsFile)
-	// 		jsonBalPools := make(map[string]map[string][]BalancerPoolJson)
-	// 		fmt.Println("Unmarshalling")
-	// 		err = json.Unmarshal(balPoolsBytes, &jsonBalPools)
-	// 		assert.Nil(t, err)
-	// 		data := jsonBalPools["data"]
-	// 		pools := data["pools"]
-	// 		for _, pool := range pools {
-	// 			var pt PoolType
-	// 			if pool.PoolType == "Weighted" {
-	// 				pt = BalancerWeightedPool
-	// 			} else if pool.PoolType == "Stable" {
-	// 				pt = BalancerStablePool
-	// 			} else {
-	// 				continue
-	// 			}
-	// 			address := common.HexToAddress(pool.Address)
-	// 			swapFee, err := strconv.ParseFloat(pool.SwapFee, 10)
-	// 			poolInfo := &PoolInfo{
-	// 				Fee:          FloatToBigInt(swapFee * 1e18),
-	// 				Reserves:     make(map[common.Address]*big.Int),
-	// 				Weights:      make(map[common.Address]*big.Int),
-	// 				ScaleFactors: make(map[common.Address]*big.Int),
-	// 				Tokens:       make([]common.Address, len(pool.Tokens)),
-	// 				LastUpdate:   time.Now(),
-	// 				Type:         pt,
-	// 			}
-	// 			amp, err := strconv.ParseFloat(pool.Amp, 10)
-	// 			if err == nil {
-	// 				poolInfo.AmplificationParam = FloatToBigInt(amp * 1e18)
-	// 			}
-	// 			for i, tok := range pool.Tokens {
-	// 				tokAddr := common.HexToAddress(tok.Address)
-	// 				poolInfo.Tokens[i] = tokAddr
-	// 				decimalsDiff := int64(18 - tok.Decimals)
-	// 				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
-	// 				poolInfo.ScaleFactors[tokAddr] = scaleFactor
-	// 				if tok.Weight != "" {
-	// 					weightFloat, err := strconv.ParseFloat(tok.Weight, 10)
-	// 					assert.Nil(t, err)
-	// 					poolInfo.Weights[tokAddr] = big.NewInt(int64(weightFloat * 1e18))
-	// 				}
-	// 				balance, _ := strconv.ParseFloat(tok.Balance, 10)
-	// 				balance *= math.Pow(10, float64(tok.Decimals))
-	// 				poolInfo.Reserves[tokAddr] = FloatToBigInt(balance)
+		// Balancer pools
+		balPoolsFileName := root + "data/beets_formatted.json"
+		balPoolsFile, err := os.Open(balPoolsFileName)
+		assert.Nil(t, err)
+		defer balPoolsFile.Close()
+		balPoolsBytes, _ := ioutil.ReadAll(balPoolsFile)
+		jsonBalPools := make(map[string]map[string][]BalancerPoolJson)
+		fmt.Println("Unmarshalling")
+		err = json.Unmarshal(balPoolsBytes, &jsonBalPools)
+		assert.Nil(t, err)
+		data := jsonBalPools["data"]
+		pools := data["pools"]
+		for _, pool := range pools {
+			var pt PoolType
+			if pool.PoolType == "Weighted" {
+				pt = BalancerWeightedPool
+			} else if pool.PoolType == "Stable" {
+				pt = BalancerStablePool
+			} else {
+				continue
+			}
+			address := common.HexToAddress(pool.Address)
+			swapFee, err := strconv.ParseFloat(pool.SwapFee, 10)
+			poolInfo := &PoolInfo{
+				Fee:          FloatToBigInt(swapFee * 1e18),
+				Reserves:     make(map[common.Address]*big.Int),
+				Weights:      make(map[common.Address]*big.Int),
+				ScaleFactors: make(map[common.Address]*big.Int),
+				Tokens:       make([]common.Address, len(pool.Tokens)),
+				LastUpdate:   time.Now(),
+				Type:         pt,
+			}
+			amp, err := strconv.ParseFloat(pool.Amp, 10)
+			if err == nil {
+				poolInfo.AmplificationParam = FloatToBigInt(amp * 1e18)
+			}
+			for i, tok := range pool.Tokens {
+				tokAddr := common.HexToAddress(tok.Address)
+				poolInfo.Tokens[i] = tokAddr
+				decimalsDiff := int64(18 - tok.Decimals)
+				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+				poolInfo.ScaleFactors[tokAddr] = scaleFactor
+				if tok.Weight != "" {
+					weightFloat, err := strconv.ParseFloat(tok.Weight, 10)
+					assert.Nil(t, err)
+					poolInfo.Weights[tokAddr] = big.NewInt(int64(weightFloat * 1e18))
+				}
+				balance, _ := strconv.ParseFloat(tok.Balance, 10)
+				balance *= math.Pow(10, float64(tok.Decimals))
+				poolInfo.Reserves[tokAddr] = FloatToBigInt(balance)
 
-	// 			}
-	// 			poolsInfo[address] = poolInfo
-	// 		}
-	// 		fmt.Printf("ALateQuartet: %v\n", poolsInfo[ALateQuartet])
-	// 		fmt.Printf("OneGodBetweenTwoStables: %v\n", poolsInfo[OneGodBetweenTwoStables])
-	// 		b.SetPoolsInfo(poolsInfo)
-	// 		b.SetEdgePools(edgePools)
-	// 		b.aggregatePools = makeAggregatePoolsFloat(b.edgePools, b.poolsInfo, nil)
-	// 		for i := 0; i < len(ScoreTiers); i++ {
-	// 			b.routeCache.Scores[i] = b.makeScores(ScoreTiers[i])
-	// 			for idx, score := range b.routeCache.Scores[i] {
-	// 				if math.IsNaN(score) {
-	// 					fmt.Printf("NaN score: %d\n", idx)
-	// 					b.getRouteAmountOutBalancer(b.routeCache.Routes[idx], 1e18, nil, true)
-	// 					break
-	// 				}
-	// 			}
-	// 		}
-	// 		// fmt.Printf("Scores: %v", b.routeCache.Scores)
-	// 		fmt.Println("\tSetPoolsInfo: \t\tPASS")
-	// 	})
+			}
+			poolsInfo[address] = poolInfo
+		}
+		fmt.Printf("ALateQuartet: %v\n", poolsInfo[ALateQuartet])
+		fmt.Printf("OneGodBetweenTwoStables: %v\n", poolsInfo[OneGodBetweenTwoStables])
+		b.SetPoolsInfo(poolsInfo)
+		b.SetEdgePools(edgePools)
+		b.aggregatePools = makeAggregatePoolsFloat(b.edgePools, b.poolsInfo, nil, nil)
+		for i := 0; i < len(ScoreTiers); i++ {
+			b.routeCache.Scores[i] = b.makeScores(ScoreTiers[i])
+			for idx, score := range b.routeCache.Scores[i] {
+				if math.IsNaN(score) {
+					fmt.Printf("NaN score: %d\n", idx)
+					b.getRouteAmountOutBalancer(b.routeCache.Routes[idx], 1e18, nil, true)
+					break
+				}
+			}
+		}
+		// fmt.Printf("Scores: %v", b.routeCache.Scores)
+		fmt.Println("\tSetPoolsInfo: \t\tPASS")
+	})
 
-	// 	t.Run("bench", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		for i := 0; i < 1; i++ {
-	// 			start := time.Now()
-	// 			updates := []PoolUpdate{
-	// 				PoolUpdate{
-	// 					Addr: SpookyWftmBtc,
-	// 					Reserves: map[common.Address]*big.Int{
-	// 						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("10772184364004447628497336"),
-	// 						common.HexToAddress("0x321162Cd933E2Be498Cd2267a90534A804051b11"): StringToBigInt("11600000000"),
-	// 					},
-	// 				},
-	// 				PoolUpdate{
-	// 					Addr: SpookyWftmUsdc,
-	// 					Reserves: map[common.Address]*big.Int{
-	// 						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("60565680072230427474078345"),
-	// 						common.HexToAddress("0x04068da6c83afcfa0e13ba15a6696662335d5b75"): StringToBigInt("19300000000000"),
-	// 					},
-	// 				},
-	// 			}
-	// 			poolsInfoOverride, updatedKeys := b.makeUpdates(updates)
-	// 			fmt.Printf("Made updates after %s, keys %d\n", utils.PrettyDuration(time.Now().Sub(start)), len(updatedKeys))
-	// 			var pop Population
-	// 			candidateRoutes := 0
-	// 			maxScoreTier := len(ScoreTiers)
-	// 			for _, key := range updatedKeys {
-	// 				stepStart := time.Now()
-	// 				var keyPop Population
-	// 				keyPop, maxScoreTier = b.getProfitableRoutes(key, poolsInfoOverride, time.Duration(0), maxScoreTier)
-	// 				pop = append(pop, keyPop...)
-	// 				fmt.Printf("getProfitableRoutes completed after %s %s, returned %d/%d, maxScoreTier %d\n",
-	// 					utils.PrettyDuration(time.Now().Sub(stepStart)),
-	// 					utils.PrettyDuration(time.Now().Sub(start)),
-	// 					len(keyPop),
-	// 					len(b.routeCache.PoolToRouteIdxs[key][0]),
-	// 					maxScoreTier,
-	// 				)
-	// 				// pop[:10].Print()
-	// 				candidateRoutes += len(b.routeCache.PoolToRouteIdxs[key][0])
-	// 			}
-	// 			fmt.Printf("Computed candidate routes after %s, len %d/%d\n", utils.PrettyDuration(time.Now().Sub(start)), len(pop), candidateRoutes)
-	// 			plan := b.getMostProfitablePath(pop, poolsInfoOverride, FloatToBigInt(1e10))
-	// 			assert.NotNil(t, plan)
-	// 			fmt.Printf("Made plan after %s, route %d, profit %f\n\n", utils.PrettyDuration(time.Now().Sub(start)),
-	// 				plan.RouteIdx, BigIntToFloat(plan.NetProfit)/1e18)
-	// 			assert.Greater(BigIntToFloat(plan.NetProfit)/1e18, 49000.0)
-	// 		}
-	// 	})
+	t.Run("bench", func(t *testing.T) {
+		assert := assert.New(t)
+		for i := 0; i < 1; i++ {
+			start := time.Now()
+			updates := []PoolUpdate{
+				PoolUpdate{
+					Addr: SpookyWftmBtc,
+					Reserves: map[common.Address]*big.Int{
+						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("10772184364004447628497336"),
+						common.HexToAddress("0x321162Cd933E2Be498Cd2267a90534A804051b11"): StringToBigInt("11600000000"),
+					},
+				},
+				PoolUpdate{
+					Addr: SpookyWftmUsdc,
+					Reserves: map[common.Address]*big.Int{
+						common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): StringToBigInt("60565680072230427474078345"),
+						common.HexToAddress("0x04068da6c83afcfa0e13ba15a6696662335d5b75"): StringToBigInt("19300000000000"),
+					},
+				},
+			}
+			poolsInfoOverride, updatedKeys := b.makeUpdates(updates)
+			fmt.Printf("Made updates after %s, keys %d\n", utils.PrettyDuration(time.Now().Sub(start)), len(updatedKeys))
+			var pop Population
+			candidateRoutes := 0
+			maxScoreTier := len(ScoreTiers)
+			for _, key := range updatedKeys {
+				stepStart := time.Now()
+				var keyPop Population
+				keyPop, maxScoreTier = b.getProfitableRoutes(key, poolsInfoOverride, time.Duration(0), maxScoreTier)
+				pop = append(pop, keyPop...)
+				fmt.Printf("getProfitableRoutes completed after %s %s, returned %d/%d, maxScoreTier %d\n",
+					utils.PrettyDuration(time.Now().Sub(stepStart)),
+					utils.PrettyDuration(time.Now().Sub(start)),
+					len(keyPop),
+					len(b.routeCache.PoolToRouteIdxs[key][0]),
+					maxScoreTier,
+				)
+				// pop[:10].Print()
+				candidateRoutes += len(b.routeCache.PoolToRouteIdxs[key][0])
+			}
+			fmt.Printf("Computed candidate routes after %s, len %d/%d\n", utils.PrettyDuration(time.Now().Sub(start)), len(pop), candidateRoutes)
+			plan := b.getMostProfitablePath(pop, poolsInfoOverride, FloatToBigInt(1e10))
+			assert.NotNil(t, plan)
+			fmt.Printf("Made plan after %s, route %d, profit %f\n\n", utils.PrettyDuration(time.Now().Sub(start)),
+				plan.RouteIdx, BigIntToFloat(plan.NetProfit)/1e18)
+			assert.Greater(BigIntToFloat(plan.NetProfit)/1e18, 49000.0)
+		}
+	})
 
 	// 	t.Run("bench 2", func(t *testing.T) {
 	// 		for i := 0; i < 1; i++ {

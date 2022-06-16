@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -359,7 +360,7 @@ func (s *LinearStrategy) getRouteAmountOut(route []*Leg, amountIn float64, pools
 }
 
 func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
-	// start := time.Now()
+	start := time.Now()
 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
 	var updatedKeys []PoolKey
 	for _, u := range ptx.Updates {
@@ -373,15 +374,15 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 			poolKeyFromAddrs(poolInfo.Tokens[1], poolInfo.Tokens[0], u.Addr))
 	}
 	var allProfitableRoutes []uint
-	// candidateRoutes := 0
+	candidateRoutes := 0
 	maxScoreTier := len(ScoreTiers)
 	for _, key := range updatedKeys {
 		var keyPop []uint
 		keyPop, maxScoreTier = s.getProfitableRoutes(key, poolsInfoOverride, 4*time.Second, maxScoreTier)
 		allProfitableRoutes = append(allProfitableRoutes, keyPop...)
-		// if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
-		// 	candidateRoutes += len(routeIdxs[0])
-		// }
+		if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
+			candidateRoutes += len(routeIdxs[0])
+		}
 		// profitableRoutes := s.getProfitableRoutes(key, poolsInfoOverride)
 		// allProfitableRoutes = append(allProfitableRoutes, profitableRoutes...)
 		// candidateRoutes += len(s.routeCache.PoolToRouteIdxs[key])
@@ -397,6 +398,7 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		return
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
+	log.Info("strategy_linear final route", "strategy", s.Name, "profitable", len(allProfitableRoutes), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
 	// for i, leg := range plan.Path {
 	// 	poolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, leg.Pair)
 	// 	origPoolInfo := s.poolsInfo[leg.Pair]
@@ -456,6 +458,7 @@ func (s *LinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverride map[
 		return pop, maxScoreTier
 	}
 	i := 0
+	// outer:
 	for ; i < maxScoreTier; i++ {
 		h := RouteIdxHeap{s.routeCache.Scores[i], routeIdxs[i]}
 		heap.Init(&h)
@@ -470,6 +473,9 @@ func (s *LinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverride map[
 				break
 			}
 			pop = append(pop, routeIdx)
+			// if len(pop) >= (i+1)*5 {
+			// 	break outer
+			// }
 		}
 		if len(pop) > 0 {
 			break

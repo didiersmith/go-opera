@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
-	"runtime"
 	"math"
 	"math/big"
 	"os"
@@ -74,6 +73,7 @@ var (
 	accuracyAlpha                = 0.8
 	bravadoAlpha                 = 0.75
 	gasAlpha                     = 0.5
+	mttsAlpha                    = 0.1
 	defaultValidatorIds          = []idx.ValidatorID{
 		17,
 		28,
@@ -121,6 +121,7 @@ var (
 		common.HexToAddress("0x0d1e08ff8513947509162eb8bdb02e6ee892c7f3"): "Lazy Larry",
 		common.HexToAddress("0x00F496939f165119eC0bBeaC346508f4a4D5ccAC"): "Egghead",
 		common.HexToAddress("0x9e8727b8423a37609a7a03a4e961611b9713ea1f"): "The Humans Are Dead",
+		common.HexToAddress("0x8Ec7DE3e664F3e64d6bB6f017911fb609e7D9B70"): "Dolla dolla coin",
 	}
 	contracts = map[common.Address]string{
 		common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8"): "Fish3",
@@ -170,7 +171,6 @@ type Dexter struct {
 	eventRaceChan     chan *RaceEntry
 	txRaceChan        chan *RaceEntry
 	railgunChan       chan *dexter.RailgunPacket
-	txLagRequestChan  chan common.Hash
 	strategies        []dexter.Strategy
 	strategyBravado   []float64
 	mtts              []time.Duration
@@ -188,6 +188,8 @@ type Dexter struct {
 	validators     *pos.Validators
 	epoch          idx.Epoch
 	mu             sync.RWMutex
+	lastValidatorCheckedTime time.Time
+	validatorMu    sync.RWMutex
 	gunMu          sync.Mutex
 }
 
@@ -247,7 +249,6 @@ func NewDexter(svc *Service) *Dexter {
 		eventRaceChan:     make(chan *RaceEntry, 8192),
 		txRaceChan:        make(chan *RaceEntry, 8192),
 		railgunChan:       make(chan *dexter.RailgunPacket, 8),
-		txLagRequestChan:  make(chan common.Hash, 16),
 		// tokenWhitelistChan: make(chan common.Address, 128),
 		poolsInfo: make(map[common.Address]*dexter.PoolInfo),
 		gasFloors: make(map[idx.ValidatorID]int64),
@@ -429,8 +430,8 @@ func NewDexter(svc *Service) *Dexter {
 	go d.runRailgun()
 	go d.updateMethods()
 	go d.watchFriendlyFire()
-	// svc.handler.RaceEvents(d.eventRaceChan)
-	// svc.handler.RaceTxs(d.txRaceChan)
+	svc.handler.RaceEvents(d.eventRaceChan)
+	svc.handler.RaceTxs(d.txRaceChan)
 	return d
 }
 
@@ -477,53 +478,37 @@ func mapToSortedBytePools(m map[[4]byte]int) BytePoolList {
 }
 
 func (d *Dexter) eventRace() {
-	eventCapacity := 1000
-	seenEvents := make(map[common.Hash]struct{}, eventCapacity)
+	seenTxs, _ := lru.New(512)
+	seenEvents, _ := lru.New(4096)
 	eventWins := make(map[string]int)
-
-	txCapacity := 10000
-	seenTxs := make(map[common.Hash]*RaceEntry, txCapacity)
 	txWins := make(map[string]int)
-
 	minLifetime := 5 * 60 * time.Second
 	numSortedTxPeers := 8
 	prevCullTime := time.Now()
 	for {
 		select {
 		case e := <-d.eventRaceChan:
-			if _, ok := seenEvents[e.Hash]; !ok {
-				seenEvents[e.Hash] = struct{}{}
+			if _, ok := seenEvents.Get(e.Hash); !ok {
+				seenEvents.Add(e.Hash, struct{}{})
 				if wins, ok := eventWins[e.PeerID]; ok {
 					eventWins[e.PeerID] = wins + 1
 				} else {
 					eventWins[e.PeerID] = 1
 				}
 			}
-			if len(seenEvents) >= eventCapacity {
-				// log.Info("Resetting seen events")
-				seenEvents = make(map[common.Hash]struct{}, eventCapacity)
-			}
 		case e := <-d.txRaceChan:
-			if _, ok := seenTxs[e.Hash]; !ok {
-				seenTxs[e.Hash] = e
+			if _, ok := seenTxs.Get(e.Hash); !ok {
+				seenTxs.Add(e.Hash, e)
 				if wins, ok := txWins[e.PeerID]; ok {
 					txWins[e.PeerID] = wins + 1
 				} else {
 					txWins[e.PeerID] = 1
 				}
 			}
-			if len(seenTxs) >= txCapacity {
-				// log.Info("Resetting seen txs")
-				seenTxs = make(map[common.Hash]*RaceEntry, txCapacity)
-			}
-		case h := <-d.txLagRequestChan:
-			if entry, ok := seenTxs[h]; ok {
-				log.Info("Lag since first seen hash", "hash", h.Hex(), "lag", utils.PrettyDuration(time.Now().Sub(entry.T)), "full", entry.Full)
-			}
 		}
 		now := time.Now()
 		if now.Sub(prevCullTime) > minLifetime {
-			// log.Info("Calculating winners")
+			log.Info("Calculating winners")
 
 			// txWinPools := mapToSortedPools(txWins)
 			// for i, winPool := range txWinPools {
@@ -556,8 +541,8 @@ func (d *Dexter) eventRace() {
 				}
 			}
 			sortedPeers = append(sortedPeers, losers...)
-			// log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
-			// d.svc.handler.peers.Cull(losers)
+			log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
+			d.svc.handler.peers.Cull(losers)
 			d.svc.handler.peers.SetSortedPeers(sortedPeers)
 			d.svc.handler.peers.SetSortedTxPeers(sortedTxPeers)
 			// log.Info("Connected peers", "peers", strings.Join(d.svc.handler.peers.GetSortedIPs(), ", "))
@@ -789,7 +774,7 @@ func (d *Dexter) processIncomingTxs() {
 			if d.lag > 4*time.Second {
 				continue
 			}
-			d.processTx(tx)
+			go d.processTx(tx)
 			d.numPending, _ = d.svc.txpool.Stats()
 		case n := <-d.inBlockChan:
 			numFiredThisBlock = 0
@@ -993,26 +978,33 @@ func (d *Dexter) processPendingLogs(l *types.Log, statedb *state.StateDB) *dexte
 
 func (d *Dexter) processTx(tx *types.Transaction) {
 	start := time.Now()
-	from, _ := types.Sender(d.signer, tx)
-	d.mu.RLock()
-	validatorIDs := d.predictValidators(from, tx.Nonce(), d.validators, d.epoch, numValidators)
-	d.mu.RUnlock()
-	select {
-	case d.watchedTxs <- &TxSub{Hash: tx.Hash(), PredictedValidators: validatorIDs, Print: false, StartTime: start}:
-	default:
-	}
 	data := tx.Data()
 	if len(data) < 4 {
 		return
 	}
+	if start.Sub(d.lastValidatorCheckedTime) > 2 * time.Second {
+		d.lastValidatorCheckedTime = start
+		go func() {
+			from, _ := types.Sender(d.signer, tx)
+			d.validatorMu.RLock()
+			validatorIDs := d.predictValidators(from, tx.Nonce(), d.validators, d.epoch, numValidators)
+			d.validatorMu.RUnlock()
+			select {
+			case d.watchedTxs <- &TxSub{
+				Hash: tx.Hash(),
+				PredictedValidators: validatorIDs,
+				Print: false, StartTime: start,
+			}:
+			default:
+			}
+		}()
+	}
 	var method [4]byte
 	copy(method[:], data[:4])
-	d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
 	txs := types.Transactions{tx}
 	var gasUsed uint64
 	ptx := &dexter.PossibleTx{
 		Tx:           tx,
-		ValidatorIDs: validatorIDs,
 		StartTime:    start,
 	}
 	var updatedPools []dexter.BalPoolId
@@ -1071,16 +1063,18 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		ptx.Updates = append(ptx.Updates, u)
 	}
 	if len(ptx.Updates) > 0 {
-		runtime.LockOSThread()
+		// runtime.LockOSThread()
 		for _, s := range d.strategies {
 			s.ProcessPossibleTx(ptx)
 		}
-		runtime.UnlockOSThread()
+		// runtime.UnlockOSThread()
 	}
-	if len(crumbs) == 0 { // No Hansel
+	if true || len(crumbs) == 0 { // No Hansel
 		d.evmState.mu.Unlock() // UNLOCK MUTEX
+		d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
 		return
 	}
+	d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
 	evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs)
 	msg := d.readOnlyMessage(&hanselSearchAddr, hansel_lite.FindRoute(crumbs))
 	hanselStart := time.Now()
@@ -1115,7 +1109,6 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		HanselResponse: &dexter.HanselPlan{
 			Path: path,
 		},
-		ValidatorIDs: validatorIDs,
 		StartTime:    start,
 	})
 }
@@ -1209,9 +1202,14 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	if probAdjustedPayoff.Cmp(probAdjustedFailCost) == -1 {
 		return
 	}
-	validatorIDs := p.ValidatorIDs
+	from, _ := types.Sender(d.signer, p.Target)
+	d.validatorMu.RLock()
+	validatorIDs := d.predictValidators(from, p.Target.Nonce(), d.validators, d.epoch, numValidators)
+	p.ValidatorIDs = validatorIDs
+	d.validatorMu.RUnlock()
 	if len(validatorIDs) == 0 {
-		validatorIDs = defaultValidatorIds
+		log.Warn("No predicted validators")
+		return
 	}
 	d.gunMu.Lock() // LOCK MUTEX
 	gunIdx := d.gunList.Search(validatorIDs)
@@ -1294,9 +1292,9 @@ func (d *Dexter) runRailgun() {
 		select {
 		case <-d.inEpochChan:
 			validators, epoch := d.svc.store.GetEpochValidators()
-			d.mu.Lock()
+			d.validatorMu.Lock()
 			d.validators, d.epoch = validators, epoch
-			d.mu.Unlock()
+			d.validatorMu.Unlock()
 			go d.refreshGuns()
 		case <-d.inEpochSub.Err():
 			return
@@ -1305,7 +1303,7 @@ func (d *Dexter) runRailgun() {
 			d.gunList = guns
 			d.gunMu.Unlock()
 		case p := <-d.railgunChan:
-			d.prepAndFirePlan(p)
+			go d.prepAndFirePlan(p)
 		}
 	}
 }
@@ -1351,7 +1349,7 @@ func (d *Dexter) accountFiredGun(wallet accounts.Wallet, signedTx *types.Transac
 	default:
 	}
 	d.mu.Lock()
-	d.mtts[p.StrategyID] = time.Duration((int64(lag) + d.numFired[p.StrategyID]*int64(d.mtts[p.StrategyID]))/(d.numFired[p.StrategyID]+1))
+	d.mtts[p.StrategyID] = time.Duration(float64(lag) * mttsAlpha + float64(d.mtts[p.StrategyID]) * (1-mttsAlpha))
 	d.numFired[p.StrategyID]++
 	d.mu.Unlock()
 }

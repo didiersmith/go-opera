@@ -43,7 +43,7 @@ func (p Population) Print() {
 }
 
 func NextGeneration(p Population, popSize int, f CalcFitness) Population {
-	if len(p) < 2 {
+	if len(p) < 1 {
 		return p
 	}
 	sort.Sort(p)
@@ -52,9 +52,7 @@ func NextGeneration(p Population, popSize int, f CalcFitness) Population {
 	}
 	for len(p) < popSize {
 		a := int(rand.ExpFloat64()*float64(len(p))/4) % len(p)
-		b := a
-		for ; b == a; b = int(rand.ExpFloat64()*float64(len(p))/4) % len(p) {
-		}
+		b := int(rand.ExpFloat64()*float64(len(p))/4) % len(p)
 		p = append(p, Breed(p[a], p[b], f))
 	}
 	return p
