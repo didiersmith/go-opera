@@ -49,11 +49,14 @@ const (
 type PoolType int
 
 const (
-	UniswapV2Pair        PoolType = iota
-	BalancerWeightedPool          = iota
-	BalancerStablePool            = iota
-	SolidlyVolatilePool           = iota
-	SolidlyStablePool             = iota
+	UniswapV2Pair         PoolType = iota
+	BalancerWeightedPool           = iota
+	BalancerStablePool             = iota
+	SolidlyVolatilePool            = iota
+	SolidlyStablePool              = iota
+	CurveBasePlainPool             = iota
+	CurveFactoryPlainPool          = iota
+	CurveFactoryMetaPool           = iota
 )
 
 var ScoreTiers = []float64{1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}

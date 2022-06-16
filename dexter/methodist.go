@@ -219,7 +219,11 @@ func (m *Methodist) GetLists() (white []Method, black []Method) {
 			}
 			continue
 		}
+<<<<<<< Updated upstream
 		if stats[Confirmed] < 20 || float64(stats[UpdatedReserves])/float64(stats[Confirmed]) < 0.4 {
+=======
+		if stats[Confirmed] > 20 && float64(stats[UpdatedReserves])/float64(stats[Confirmed]) < 0.4 {
+>>>>>>> Stashed changes
 			// fmt.Printf("Blacklisting due to low update rate, %v, %d/%d, %v\n", method, stats[UpdatedReserves], stats[Confirmed], stats)
 			black = append(black, method)
 		} else {

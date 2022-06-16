@@ -175,6 +175,18 @@ func (s *BalancerLinearStrategy) loadJson() {
 			} else if leg.ExchangeType == "balancerStablePool" {
 				t = BalancerStablePool
 				s.interestedPools[poolId] = t
+			} else if leg.ExchangeType == "curveBasePlainPool" {
+				log.Info("Adding curve pool")
+				t = CurveBasePlainPool
+				s.interestedPools[poolId] = t
+			} else if leg.ExchangeType == "curveFactoryPlainPool" {
+				log.Info("Adding curve pool")
+				t = CurveFactoryPlainPool
+				s.interestedPools[poolId] = t
+			} else if leg.ExchangeType == "curveFactoryMetaPool" {
+				log.Info("Adding curve pool")
+				t = CurveFactoryMetaPool
+				s.interestedPools[poolId] = t
 			} else {
 				t = UniswapV2Pair
 				s.interestedPairs[poolAddr] = t
@@ -379,22 +391,19 @@ func getAmountOutBalancerStable(amountIn, fee, amp float64, balances map[common.
 	amountIn = upScale(amountIn, scaleIn)
 	inv := calcStableInvariant(amp, balances)
 	finalOut := getTokenBalanceGivenInvAndBalances(amp, inv, balances, balances[tokenIn]+amountIn, tokenIn, tokenOut)
-	// fmt.Printf("balOut: %v, finalOut: %v\n", balances[tokenOut], finalOut)
+	// fmt.Printf("Balancer - balOut: %v, finalOut: %v\n", balances[tokenOut], finalOut)
 	return downScale(balances[tokenOut]-finalOut-1, scaleOut)
 }
 
 func getAmountOutCurve(amountIn, fee, amp float64, balances map[common.Address]float64, tokenIn, tokenOut common.Address, scaleIn, scaleOut float64) float64 {
 	amountIn = upScale(amountIn, scaleIn)
-	newBals := make(map[common.Address]float64)
-	for k, v := range balances {
-		newBals[k] = v
-	}
-	newBals[tokenIn] += amountIn
-	inv := calcStableInvariant(amp, newBals)
-	finalOut := getTokenBalanceGivenInvAndBalancesCurve(amp, inv, balances, balances[tokenIn]+amountIn, tokenIn, tokenOut)
+	inv := calcCurveInvariant(amp, balances)
+	// finalOut := getTokenBalanceGivenInvAndBalances(
+	finalOut := getTokenBalanceGivenInvAndBalancesCurve(
+		amp, inv, balances, balances[tokenIn]+amountIn, tokenIn, tokenOut)
 	amountOut := balances[tokenOut] - finalOut - 1
 	amountOut = amountOut * (1 - fee)
-	fmt.Printf("balOut: %v, finalOut: %v\n", balances[tokenOut], finalOut)
+	// fmt.Printf("Curve - balOut: %v, finalOut: %v\n", balances[tokenOut], finalOut)
 	return downScale(amountOut, scaleOut)
 }
 
