@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
-	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -186,7 +185,7 @@ func (s *LinearStrategy) loadJson() {
 	s.routeCache = routeCache
 }
 
-func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
+func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFraction float64) *PoolInfoFloat {
 	s.mu.RLock()
 	poolInfo, ok := s.poolsInfo[p.Addr]
 	s.mu.RUnlock()
@@ -198,7 +197,8 @@ func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
 	for a, r := range p.Reserves {
 		rf := BigIntToFloat(r)
 		reserves[a] = rf
-		if !updated && rf != poolInfo.Reserves[a] {
+		prevReserve := poolInfo.Reserves[a]
+		if math.Abs(rf-prevReserve) > minChangeFraction*prevReserve {
 			updated = true
 		}
 	}
@@ -237,7 +237,7 @@ func (s *LinearStrategy) runStateUpdater() {
 			}
 		}
 		for addr, update := range batch.PermUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -253,7 +253,7 @@ func (s *LinearStrategy) runStateUpdater() {
 			s.mu.RUnlock()
 		}
 		for addr, update := range u.PendingUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -360,11 +360,12 @@ func (s *LinearStrategy) getRouteAmountOut(route []*Leg, amountIn float64, pools
 }
 
 func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
-	start := time.Now()
+	ptx.Log.RecordTime(StrategyStarted)
+	// start := time.Now()
 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
 	var updatedKeys []PoolKey
 	for _, u := range ptx.Updates {
-		poolInfo := s.makePoolInfoFloat(&u)
+		poolInfo := s.makePoolInfoFloat(&u, minChangeFrac)
 		if poolInfo == nil {
 			continue
 		}
@@ -398,7 +399,8 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		return
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
-	log.Info("strategy_linear final route", "strategy", s.Name, "profitable", len(allProfitableRoutes), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
+	ptx.Log.RecordTime(StrategyFinished)
+	// log.Info("strategy_linear final route", "strategy", s.Name, "profitable", len(allProfitableRoutes), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
 	// for i, leg := range plan.Path {
 	// 	poolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, leg.Pair)
 	// 	origPoolInfo := s.poolsInfo[leg.Pair]
@@ -411,6 +413,7 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		Response:     plan,
 		ValidatorIDs: ptx.ValidatorIDs,
 		StartTime:    ptx.StartTime,
+		Log:          ptx.Log,
 	}
 }
 

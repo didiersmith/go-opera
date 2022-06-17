@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
-	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -129,6 +128,10 @@ func (s *BalancerLinearStrategy) Start() {
 	s.aggregatePools = makeAggregatePoolsFloat(s.edgePools, s.poolsInfo, nil, nil)
 	for i := 0; i < len(ScoreTiers); i++ {
 		s.routeCache.Scores[i] = s.makeScores(ScoreTiers[i])
+		for _, routeIdxs := range s.routeCache.PoolToRouteIdxs {
+			h := RouteIdxHeap{s.routeCache.Scores[i], routeIdxs[i]}
+			heap.Init(&h)
+		}
 	}
 	go s.runStateUpdater()
 	go s.runStrategy()
@@ -214,7 +217,7 @@ func (s *BalancerLinearStrategy) getRouteAmountOutBalancer(
 		poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, leg.PoolAddr)
 		s.mu.RUnlock()
 		reserveFrom, reserveTo := poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To]
-		if leg.Type == UniswapV2Pair {
+		if leg.Type == UniswapV2Pair || leg.Type == SolidlyVolatilePool {
 			amountOut = getAmountOutUniswapFloat(amountIn, reserveFrom, reserveTo, poolInfo.FeeNumerator)
 			if debug {
 				fmt.Printf("Leg: uniswap, i: %d, addr: %s, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amountIn: %f, amountOut: %f\n", i, leg.PoolAddr, reserveFrom, reserveTo, poolInfo.FeeNumerator, amountIn, amountOut)
@@ -541,7 +544,7 @@ func (s *BalancerLinearStrategy) refreshScoresForPools(
 	}
 }
 
-func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
+func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFraction float64) *PoolInfoFloat {
 	s.mu.RLock()
 	poolInfo, ok := s.poolsInfo[p.Addr]
 	s.mu.RUnlock()
@@ -558,7 +561,8 @@ func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat
 			rf = BigIntToFloat(r)
 		}
 		reserves[a] = rf
-		if !updated && rf != poolInfo.Reserves[a] {
+		prevReserve := poolInfo.Reserves[a]
+		if math.Abs(rf-prevReserve) > minChangeFraction*prevReserve {
 			updated = true
 		}
 	}
@@ -603,7 +607,7 @@ func (s *BalancerLinearStrategy) runStateUpdater() {
 			}
 		}
 		for addr, update := range batch.PermUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -620,7 +624,7 @@ func (s *BalancerLinearStrategy) runStateUpdater() {
 			}
 		}
 		for addr, update := range u.PendingUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -670,7 +674,7 @@ func (s *BalancerLinearStrategy) runStrategy() {
 func (s *BalancerLinearStrategy) makeUpdates(updates []PoolUpdate) (poolsInfoOverride map[common.Address]*PoolInfoFloat, updatedKeys []PoolKey) {
 	poolsInfoOverride = make(map[common.Address]*PoolInfoFloat)
 	for _, u := range updates {
-		poolInfo := s.makePoolInfoFloat(&u)
+		poolInfo := s.makePoolInfoFloat(&u, minChangeFrac)
 		if poolInfo == nil {
 			continue
 		}
@@ -688,7 +692,8 @@ func (s *BalancerLinearStrategy) makeUpdates(updates []PoolUpdate) (poolsInfoOve
 }
 
 func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
-	start := time.Now()
+	ptx.Log.RecordTime(StrategyStarted)
+	// start := time.Now()
 	poolsInfoOverride, updatedKeys := s.makeUpdates(ptx.Updates)
 	var pop Population
 	candidateRoutes := 0
@@ -712,7 +717,8 @@ func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		return
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
-	log.Info("strategy_balancer_linear final route", "strategy", s.Name, "profitable", len(pop), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
+	// log.Info("strategy_balancer_linear final route", "strategy", s.Name, "profitable", len(pop), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
+	ptx.Log.RecordTime(StrategyFinished)
 	s.RailgunChan <- &RailgunPacket{
 		Type:         SwapSinglePath,
 		StrategyID:   s.ID,
@@ -720,6 +726,7 @@ func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		Response:     plan,
 		ValidatorIDs: ptx.ValidatorIDs,
 		StartTime:    ptx.StartTime,
+		Log:          ptx.Log,
 	}
 }
 

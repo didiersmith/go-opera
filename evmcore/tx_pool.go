@@ -151,7 +151,7 @@ var (
 		[4]byte{108, 181, 140, 147}, // leave(address vault, uint256 share)
 		[4]byte{112, 250, 226, 13},
 		[4]byte{116, 58, 203, 128},
-		[4]byte{124, 2, 82, 0},
+		// [4]byte{124, 2, 82, 0}, // slow
 		[4]byte{126, 27, 149, 7},
 		[4]byte{127, 243, 106, 181}, // []byte{0x7f, 0xf3, 0x6a, 0xb5},
 		[4]byte{136, 3, 219, 238},   // []byte{0x88, 0x03, 0xdb, 0xee},
@@ -185,7 +185,7 @@ var (
 		[4]byte{243, 188, 168, 114}, // Swing trader
 		[4]byte{245, 208, 123, 96},  // beefIn(address beefyVault, uint256 tokenAmountOutMin, address tokenIn, uint256 tokenInAmount)
 		[4]byte{251, 59, 219, 65},   // []byte{0xfb, 0x3b, 0xdb, 0x41},
-		[4]byte{253, 181, 160, 62},  // Reinvest
+		// [4]byte{253, 181, 160, 62},  // Reinvest -- slow
 		[4]byte{253, 181, 254, 252}, // earn(address _bountyHunter)
 		[4]byte{255, 194, 88, 15},
 		[4]byte{28, 255, 121, 205},
@@ -353,10 +353,11 @@ type TxPool struct {
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 
-	dexterTxChan           chan *types.Transaction
+	dexterTxChan           chan *dexter.TxWithTimeLog
 	dexterFriendlyFireChan chan common.Address
 	specialMethods         map[[4]byte]struct{}
 	specialMethodsMu       sync.RWMutex
+	toBlacklist            map[common.Address]struct{}
 }
 
 type txpoolResetRequest struct {
@@ -387,6 +388,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 		reorgShutdownCh: make(chan struct{}),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 		specialMethods:  make(map[[4]byte]struct{}),
+		toBlacklist:     make(map[common.Address]struct{}),
 	}
 	for _, m := range specialMethods {
 		pool.specialMethods[m] = struct{}{}
@@ -423,7 +425,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 	return pool
 }
 
-func (pool *TxPool) AttachDexter(c chan *types.Transaction, f chan common.Address) {
+func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan common.Address) {
 	pool.dexterTxChan = c
 	pool.dexterFriendlyFireChan = f
 }
@@ -444,6 +446,12 @@ func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
 			delete(pool.specialMethods, m)
 			pool.specialMethodsMu.Unlock()
 		}
+	}
+}
+
+func (pool *TxPool) SetToBlacklist(addrs map[common.Address]string) {
+	for a, _ := range addrs {
+		pool.toBlacklist[a] = struct{}{}
 	}
 }
 
@@ -1027,6 +1035,9 @@ func (pool *TxPool) hackCheckIncomingTx(tx *types.Transaction) DexterTxInterest 
 	if to == nil {
 		return NotInterested
 	}
+	if _, ok := pool.toBlacklist[*to]; ok {
+		return NotInterested
+	}
 	// toBytes := to.Bytes()
 	// if bytes.Compare(mrMillion[:], toBytes) == 0 {
 	// 	from, _ := types.Sender(pool.signer, tx)
@@ -1082,12 +1093,14 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		return errs
 	}
 
-	for _, tx := range news {
-		if pool.dexterTxChan != nil {
+	if pool.dexterTxChan != nil {
+		for _, tx := range news {
 			interest := pool.hackCheckIncomingTx(tx)
 			if interest == PotentialTarget {
+				txWTL := dexter.TxWithTimeLog{tx, dexter.NewTimeLog(tx.Time())}
+				txWTL.Log.RecordTime(dexter.TxPoolDetected)
 				select {
-				case pool.dexterTxChan <- tx:
+				case pool.dexterTxChan <- &txWTL:
 				default:
 				}
 			} else if interest == DexterFriendlyFire {

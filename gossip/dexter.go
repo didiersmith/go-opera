@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"math/big"
@@ -121,7 +122,18 @@ var (
 		common.HexToAddress("0x0d1e08ff8513947509162eb8bdb02e6ee892c7f3"): "Lazy Larry",
 		common.HexToAddress("0x00F496939f165119eC0bBeaC346508f4a4D5ccAC"): "Egghead",
 		common.HexToAddress("0x9e8727b8423a37609a7a03a4e961611b9713ea1f"): "The Humans Are Dead",
-		common.HexToAddress("0x8Ec7DE3e664F3e64d6bB6f017911fb609e7D9B70"): "Dolla dolla coin",
+		common.HexToAddress("0x8Ec7DE3e664F3e64d6bB6f017911fb609e7D9B70"): "Fiat Panda",
+		common.HexToAddress("0xa517750EB8D93bA37F6595773153ea9Ec7aE0AF8"): "Die hard try hard",
+		common.HexToAddress("0xcAAe8702B51478E89ff69436106C00446e4f557F"): "Calcaholics anonymous",
+		common.HexToAddress("0x1713E0F1010F8a3fD2629dCaA25cd96939F5E5f8"): "Bianca Castafiore",
+		common.HexToAddress("0x2162D7E1FE3C29d14be28c5B78E3B6264006e806"): "Twenty-one Pilots",
+		common.HexToAddress("0x3952a14252A9a7ae93017C10146BAD7110a526dd"): "Farmer Frank",
+		common.HexToAddress("0x8b39ffc41b82ef37bfd97d9ea390cd19b437a22c"): "Blue Chip Buster",
+		common.HexToAddress("0x4992a76c6835f03afe73a20cec8445336daea05a"): "Nein nein nein",
+		common.HexToAddress("0x7adfF61E398a979F8eD618984a6e2FB7cfa5b54E"): "Seven Army",
+		common.HexToAddress("0xe639d78bd9281ebeb3f0bef25e1fea95835dea57"): "Monosodium Glutamate",
+		common.HexToAddress("0x30cE95DD82fE8EeF226222eC653a7B14A3222103"): "Try hard Tony",
+		common.HexToAddress("0x5e6d798717f09cb56aff739eed30bf69206d640f"): "Billy Goat Gruff",
 	}
 	contracts = map[common.Address]string{
 		common.HexToAddress("0xba164fB7530b24cF73d183ce0140AF9Ab8C35Cd8"): "Fish3",
@@ -148,7 +160,7 @@ var (
 
 type Dexter struct {
 	svc          *Service
-	inTxChan     chan *types.Transaction
+	inTxChan     chan *dexter.TxWithTimeLog
 	inFriendlyFireChan     chan common.Address
 	inLogsChan   chan []*types.Log
 	inLogsSub    notify.Subscription
@@ -175,6 +187,7 @@ type Dexter struct {
 	strategyBravado   []float64
 	mtts              []time.Duration
 	numFired          []int64
+	numFiredThisBlock int
 	firedTxChan       chan *FiredTx
 	// tokenWhitelistChan chan common.Address
 	poolsInfo      map[common.Address]*dexter.PoolInfo
@@ -182,7 +195,6 @@ type Dexter struct {
 	gasFloors      map[idx.ValidatorID]int64
 	globalGasFloor int64
 	globalGasPrice int64
-	numPending     int
 	methodist      *dexter.Methodist
 	evmState       *EvmState
 	validators     *pos.Validators
@@ -230,7 +242,7 @@ func NewDexter(svc *Service) *Dexter {
 	log.Info("Creating dexter")
 	d := &Dexter{
 		svc:             svc,
-		inTxChan:        make(chan *types.Transaction, 32),
+		inTxChan:        make(chan *dexter.TxWithTimeLog, 32),
 		inFriendlyFireChan:    make(chan common.Address, 32),
 		inLogsChan:      make(chan []*types.Log, 4096),
 		inBlockChan:     make(chan evmcore.ChainHeadNotify, 4096),
@@ -422,16 +434,18 @@ func NewDexter(svc *Service) *Dexter {
 		s.Start()
 	}
 
+	d.svc.txpool.SetToBlacklist(arbitrageurs)
 	d.refreshEvmState(types.Receipts{})
 	go d.processIncomingLogs()
 	go d.processIncomingTxs()
+	go d.processIncomingBlocks()
 	go d.watchEvents()
 	go d.eventRace()
 	go d.runRailgun()
 	go d.updateMethods()
 	go d.watchFriendlyFire()
 	svc.handler.RaceEvents(d.eventRaceChan)
-	svc.handler.RaceTxs(d.txRaceChan)
+	// svc.handler.RaceTxs(d.txRaceChan)
 	return d
 }
 
@@ -508,8 +522,6 @@ func (d *Dexter) eventRace() {
 		}
 		now := time.Now()
 		if now.Sub(prevCullTime) > minLifetime {
-			log.Info("Calculating winners")
-
 			// txWinPools := mapToSortedPools(txWins)
 			// for i, winPool := range txWinPools {
 			// 	log.Info("tx wins", "i", i, "peer", winPool.Key, "wins", winPool.Value)
@@ -522,8 +534,9 @@ func (d *Dexter) eventRace() {
 					continue // Give the noob a chance
 				}
 				_, wonEvent := eventWins[peer.id]
-				txWins, wonTx := txWins[peer.id]
-				if !wonEvent && (!wonTx || txWins < 3) {
+				// txWins, wonTx := txWins[peer.id]
+				// if !wonEvent && (!wonTx || txWins < 3) {
+				if !wonEvent {
 					losers = append(losers, peer.id)
 				}
 			}
@@ -533,13 +546,13 @@ func (d *Dexter) eventRace() {
 				sortedPeers = append(sortedPeers, winPool.Key)
 			}
 			sortedTxPeers := make([]string, 0, numSortedTxPeers)
-			txWinPools := mapToSortedPools(txWins)
-			for _, winPool := range txWinPools {
-				sortedTxPeers = append(sortedTxPeers, winPool.Key)
-				if len(sortedTxPeers) == numSortedTxPeers {
-					break
-				}
-			}
+			// txWinPools := mapToSortedPools(txWins)
+			// for _, winPool := range txWinPools {
+			// 	sortedTxPeers = append(sortedTxPeers, winPool.Key)
+			// 	if len(sortedTxPeers) == numSortedTxPeers {
+			// 		break
+			// 	}
+			// }
 			sortedPeers = append(sortedPeers, losers...)
 			log.Info("Detected winners and losers", "peers", len(peers), "eventWins", len(eventWins), "txWins", len(txWins), "losers", len(losers), "sorted", len(sortedPeers), "sortedTxPeers", len(sortedTxPeers))
 			d.svc.handler.peers.Cull(losers)
@@ -758,26 +771,31 @@ func (d *Dexter) processIncomingLogs() {
 
 func (d *Dexter) processIncomingTxs() {
 	log.Info("Started dexter")
-	seenTxs, _ := lru.New(16384)
-	watchedTxMap := make(map[common.Hash]*FiredTx)
-	numFiredThisBlock := 0
+	seenTxs, _ := lru.New(8192)
+	for {
+		txWTL := <-d.inTxChan
+		if _, ok := seenTxs.Get(txWTL.Tx.Hash()); ok {
+			continue
+		}
+		seenTxs.Add(txWTL.Tx.Hash(), struct{}{})
+		if d.numFiredThisBlock > 2 {
+			continue
+		}
+		if d.lag > 4*time.Second {
+			continue
+		}
+		txWTL.Log.RecordTime(dexter.DexterReceived)
+		go d.processTx(txWTL)
+	}
+}
+
+func (d *Dexter) processIncomingBlocks() {
+	log.Info("Started dexter")
+	watchedTxMap, _ := lru.New(512)
 	for {
 		select {
-		case tx := <-d.inTxChan:
-			if _, ok := seenTxs.Get(tx.Hash()); ok {
-				continue
-			}
-			seenTxs.Add(tx.Hash(), struct{}{})
-			if numFiredThisBlock >= maxShotsPerBlock {
-				continue
-			}
-			if d.lag > 4*time.Second {
-				continue
-			}
-			go d.processTx(tx)
-			d.numPending, _ = d.svc.txpool.Stats()
 		case n := <-d.inBlockChan:
-			numFiredThisBlock = 0
+			d.numFiredThisBlock = 0
 			receipts, err := d.svc.EthAPI.GetReceipts(context.TODO(), n.Block.Hash)
 			if err != nil {
 				log.Error("Could not get block receipts", "err", err)
@@ -802,7 +820,8 @@ func (d *Dexter) processIncomingTxs() {
 				if d.methodist.Interested(method) {
 					d.methodist.Record(dexter.MethodEvent{method, dexter.Confirmed, tx.Hash()})
 				}
-				if f, ok := watchedTxMap[tx.Hash()]; ok {
+				if f_, ok := watchedTxMap.Get(tx.Hash()); ok {
+					f := f_.(*FiredTx)
 					receipt := receipts[i]
 					gasEst := new(big.Int).Div(f.Plan.GasCost, f.Plan.GasPrice)
 					if receipt.Status == types.ReceiptStatusSuccessful {
@@ -815,42 +834,35 @@ func (d *Dexter) processIncomingTxs() {
 						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID] * bravadoAlpha
 						log.Info("Fail", "est profit", dexter.BigIntToFloat(f.Plan.NetProfit)/1e18, "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)), "gas", receipt.GasUsed, "estimated", gasEst)
 					}
-					delete(watchedTxMap, tx.Hash())
+					watchedTxMap.Remove(tx.Hash())
 				}
 			}
 		case <-d.inBlockSub.Err():
 			return
 		case f := <-d.firedTxChan:
-			watchedTxMap[f.Hash] = f
-			numFiredThisBlock++
-			// case h := <-d.clearIgnoreTxChan:
-			// 	delete(d.ignoreTxs, h)
-
+			watchedTxMap.Add(f.Hash, f)
 		}
 	}
 	d.inLogsSub.Unsubscribe()
 }
 
-func (d *Dexter) playPendingEvents() bool {
+func (d *Dexter) playPendingEvents(pendingEvents hash.OrderedEvents, evmStateReader *EvmStateReader, lastBlockIdx idx.Block, statedb *state.StateDB) map[common.Address]*dexter.PoolUpdate {
 	txs := types.Transactions{}
-	for _, id := range d.evmState.pendingEvents {
+	for _, id := range pendingEvents {
 		e := d.svc.store.GetEventPayload(id)
 		txs = append(txs, e.Txs()...)
 	}
-	// log.Info("Playing pending events", "events", len(d.evmState.pendingEvents), "txs", len(txs))
-	evmBlock := d.evmBlockWith(txs, &d.evmState.bs, d.evmState.evmStateReader)
-	evmProcessor := evmcore.NewStateProcessor(d.svc.store.GetRules().EvmChainConfig(), d.evmState.evmStateReader)
+	evmBlock := d.evmBlockWith(txs, lastBlockIdx, evmStateReader)
+	evmProcessor := evmcore.NewStateProcessor(d.svc.store.GetRules().EvmChainConfig(), evmStateReader)
 	var gasUsed uint64
-	updated := false
-	// var updates []*dexter.PoolUpdate
-	evmProcessor.Process(evmBlock, d.evmState.statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
-		update := d.processPendingLogs(l, d.evmState.statedb)
+	updates := make(map[common.Address]*dexter.PoolUpdate)
+	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
+		update := d.processPendingLogs(l, statedb)
 		if update != nil {
-			d.evmState.pendingUpdates[update.Addr] = update
-			updated = true
+			updates[update.Addr] = update
 		}
 	})
-	return updated
+	return updates
 }
 
 func (d *Dexter) refreshEvmState(receipts types.Receipts) {
@@ -864,35 +876,32 @@ func (d *Dexter) refreshEvmState(receipts types.Receipts) {
 		log.Info("Could not make StateDB", "err", err)
 		return
 	}
-	d.evmState.mu.Lock()
-	defer d.evmState.mu.Unlock()
-	d.evmState.statedb = statedb
-	d.evmState.evmStateReader = evmStateReader
-	d.evmState.bs = bs
-	d.evmState.pendingUpdates = make(map[common.Address]*dexter.PoolUpdate)
 	permUpdates := make(map[common.Address]*dexter.PoolUpdate)
 	for _, receipt := range receipts {
 		for _, l := range receipt.Logs {
-			update := d.processPendingLogs(l, d.evmState.statedb)
+			update := d.processPendingLogs(l, statedb)
 			if update != nil {
 				permUpdates[update.Addr] = update
 			}
 		}
 	}
+	pendingUpdates := make(map[common.Address]*dexter.PoolUpdate)
+	var newPendingEvents hash.OrderedEvents
 	if d.lag < 4*time.Second {
 		start := 0
+		d.evmState.mu.Lock()
 		for ; start < len(d.evmState.pendingEvents); start++ {
 			e := d.evmState.pendingEvents[start]
 			if bytes.Compare(bs.LastBlock.Atropos.Bytes(), e.Bytes()) == -1 {
 				break
 			}
 		}
-		// log.Info("Block", "hash", bs.LastBlock.Atropos.Hex(), "lamport", ev.Locator().Lamport, "slicing", start, "/", len(d.evmState.pendingEvents))
-		copy(d.evmState.pendingEvents, d.evmState.pendingEvents[start:])
-		d.evmState.pendingEvents = d.evmState.pendingEvents[:len(d.evmState.pendingEvents)-start]
-		d.playPendingEvents()
+		newPendingEvents := make(hash.OrderedEvents, len(d.evmState.pendingEvents)-start)
+		copy(newPendingEvents, d.evmState.pendingEvents[start:])
+		d.evmState.mu.Unlock()
+		pendingUpdates = d.playPendingEvents(newPendingEvents, evmStateReader, bs.LastBlock.Idx, statedb)
 	}
-	if len(permUpdates) > 0 || len(d.evmState.pendingUpdates) > 0 {
+	if len(permUpdates) > 0 || len(pendingUpdates) > 0 {
 		pendingUpdatesSend := make(map[common.Address]*dexter.PoolUpdate)
 		for a, u := range d.evmState.pendingUpdates {
 			pendingUpdatesSend[a] = u // Copy this to avoid concurrent access issues
@@ -904,23 +913,41 @@ func (d *Dexter) refreshEvmState(receipts types.Receipts) {
 			})
 		}
 	}
+	d.evmState.mu.Lock()
+	defer d.evmState.mu.Unlock()
+	d.evmState.statedb = statedb
+	d.evmState.evmStateReader = evmStateReader
+	d.evmState.bs = bs
+	d.evmState.pendingUpdates = pendingUpdates
+	d.evmState.pendingEvents = newPendingEvents
 }
 
 func (d *Dexter) advanceEvmState(e *inter.EventPayload) {
-	d.evmState.mu.Lock()
-	defer d.evmState.mu.Unlock()
+	d.evmState.mu.Lock() // LOCK
 	d.evmState.pendingEvents = append(d.evmState.pendingEvents, e.Event.ID())
 	updated := false
 	if len(d.evmState.pendingEvents) > 1 && bytes.Compare(e.Event.ID().Bytes(), d.evmState.pendingEvents[len(d.evmState.pendingEvents)-2].Bytes()) == -1 {
 		// Sort and replay events
-		d.evmState.pendingEvents.ByEpochAndLamport()
-		bs := d.svc.store.GetBlockState().Copy()
-		d.evmState.statedb, _ = d.svc.store.evm.StateDB(bs.FinalizedStateRoot)
-		d.evmState.pendingUpdates = make(map[common.Address]*dexter.PoolUpdate)
-		updated = d.playPendingEvents()
+		newPendingEvents := make(hash.OrderedEvents, len(d.evmState.pendingEvents))
+		copy(newPendingEvents, d.evmState.pendingEvents)
+		statedb, _ := d.svc.store.evm.StateDB(d.evmState.bs.FinalizedStateRoot)
+		lastBlockIdx := d.evmState.bs.LastBlock.Idx
+		d.evmState.mu.Unlock() // UNLOCK - for batch replay
+		newPendingEvents.ByEpochAndLamport()
+		evmStateReader := &EvmStateReader{
+			ServiceFeed: &d.svc.feed,
+			store:       d.svc.store,
+		}
+		pendingUpdates := d.playPendingEvents(newPendingEvents, evmStateReader, lastBlockIdx, statedb)
+		d.evmState.mu.Lock() // LOCK
+		d.evmState.statedb = statedb
+		d.evmState.evmStateReader = evmStateReader
+		d.evmState.pendingUpdates = pendingUpdates
+		d.evmState.pendingEvents = newPendingEvents
+		updated = true
 	} else {
 		// Event in order; play on top of existing state
-		evmBlock := d.evmBlockWith(e.Txs(), &d.evmState.bs, d.evmState.evmStateReader)
+		evmBlock := d.evmBlockWith(e.Txs(), d.evmState.bs.LastBlock.Idx, d.evmState.evmStateReader)
 		evmProcessor := evmcore.NewStateProcessor(d.svc.store.GetRules().EvmChainConfig(), d.evmState.evmStateReader)
 		var gasUsed uint64
 		evmProcessor.Process(evmBlock, d.evmState.statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
@@ -931,17 +958,20 @@ func (d *Dexter) advanceEvmState(e *inter.EventPayload) {
 			}
 		})
 	}
-	if updated {
-		pendingUpdatesSend := make(map[common.Address]*dexter.PoolUpdate)
-		for a, u := range d.evmState.pendingUpdates {
-			pendingUpdatesSend[a] = u // Copy this to avoid concurrent access issues
-		}
-		for _, s := range d.strategies {
-			s.ProcessStateUpdates(dexter.StateUpdate{
-				PermUpdates:    nil,
-				PendingUpdates: pendingUpdatesSend,
-			})
-		}
+	if !updated {
+		d.evmState.mu.Unlock()
+		return
+	}
+	pendingUpdatesSend := make(map[common.Address]*dexter.PoolUpdate)
+	for a, u := range d.evmState.pendingUpdates {
+		pendingUpdatesSend[a] = u // Copy this to avoid concurrent access issues
+	}
+	d.evmState.mu.Unlock()
+	for _, s := range d.strategies {
+		s.ProcessStateUpdates(dexter.StateUpdate{
+			PermUpdates:    nil,
+			PendingUpdates: pendingUpdatesSend,
+		})
 	}
 }
 
@@ -962,7 +992,7 @@ func (d *Dexter) processPendingLogs(l *types.Log, statedb *state.StateDB) *dexte
 		var poolId dexter.BalPoolId
 		copy(poolId[:], l.Topics[1].Bytes())
 		var poolAddr common.Address = common.BytesToAddress(poolId[:20])
-		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs)
+		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs.LastBlock.Idx)
 		pool := d.getPoolTokensFromEvm(poolId, evm)
 		u := &dexter.PoolUpdate{
 			Addr:     poolAddr,
@@ -976,22 +1006,23 @@ func (d *Dexter) processPendingLogs(l *types.Log, statedb *state.StateDB) *dexte
 	return nil
 }
 
-func (d *Dexter) processTx(tx *types.Transaction) {
+func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
+	txWTL.Log.RecordTime(dexter.ProcessTxStarted)
 	start := time.Now()
-	data := tx.Data()
+	data := txWTL.Tx.Data()
 	if len(data) < 4 {
 		return
 	}
-	if start.Sub(d.lastValidatorCheckedTime) > 2 * time.Second {
+	if start.Sub(d.lastValidatorCheckedTime) > 200 * time.Millisecond {
 		d.lastValidatorCheckedTime = start
 		go func() {
-			from, _ := types.Sender(d.signer, tx)
+			from, _ := types.Sender(d.signer, txWTL.Tx)
 			d.validatorMu.RLock()
-			validatorIDs := d.predictValidators(from, tx.Nonce(), d.validators, d.epoch, numValidators)
+			validatorIDs := d.predictValidators(from, txWTL.Tx.Nonce(), d.validators, d.epoch, numValidators)
 			d.validatorMu.RUnlock()
 			select {
 			case d.watchedTxs <- &TxSub{
-				Hash: tx.Hash(),
+				Hash: txWTL.Tx.Hash(),
 				PredictedValidators: validatorIDs,
 				Print: false, StartTime: start,
 			}:
@@ -1001,24 +1032,29 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 	}
 	var method [4]byte
 	copy(method[:], data[:4])
-	txs := types.Transactions{tx}
+	txs := types.Transactions{txWTL.Tx}
 	var gasUsed uint64
-	ptx := &dexter.PossibleTx{
-		Tx:           tx,
-		StartTime:    start,
-	}
+	var ptxUpdates []dexter.PoolUpdate
 	var updatedPools []dexter.BalPoolId
 	var crumbs []hansel_lite.Breadcrumb
 	d.evmState.mu.Lock() // LOCK MUTEX
+	txWTL.Log.RecordTime(dexter.EvmStateCopyStarted)
 	statedb := d.evmState.statedb.Copy()
-	evmBlock := d.evmBlockWith(txs, &d.evmState.bs, d.evmState.evmStateReader)
-	evmProcessor := evmcore.NewStateProcessor(d.svc.store.GetRules().EvmChainConfig(), d.evmState.evmStateReader)
+	evmStateReader := &EvmStateReader{
+		ServiceFeed: &d.svc.feed,
+		store:       d.svc.store,
+	}
+	lastBlockIdx := d.evmState.bs.LastBlock.Idx
+	d.evmState.mu.Unlock() // UNLOCK MUTEX
+	txWTL.Log.RecordTime(dexter.TxExecuteStarted)
+	evmBlock := d.evmBlockWith(txs, lastBlockIdx, evmStateReader)
+	evmProcessor := evmcore.NewStateProcessor(d.svc.store.GetRules().EvmChainConfig(), evmStateReader)
 	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
 		poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
 		if poolAddr != nil {
 			if _, ok := d.interestedPairs[*poolAddr]; ok {
 				token0, token1 := d.getUniswapPairTokens(poolAddr)
-				ptx.Updates = append(ptx.Updates, dexter.PoolUpdate{
+				ptxUpdates = append(ptxUpdates, dexter.PoolUpdate{
 					Addr:     *poolAddr,
 					Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 				})
@@ -1028,29 +1064,29 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 			copy(poolId[:], l.Topics[1].Bytes())
 			updatedPools = append(updatedPools, poolId)
 			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
-		} else if poolAddr, amountIn0, _, _, _ := getAmountsFromSwapLog(l); poolAddr != nil {
-			if poolInfo, ok := d.poolsInfo[*poolAddr]; ok {
-				if poolInfo.Type != dexter.UniswapV2Pair && poolInfo.Type != dexter.SolidlyVolatilePool {
-					return
-				}
-				token0, token1 := d.getUniswapPairTokens(poolAddr)
-				crumb := hansel_lite.Breadcrumb{
-					FeeNumerator: poolInfo.FeeNumerator,
-					PoolType:     uint8(poolInfo.Type),
-				}
-				if amountIn0.BitLen() == 0 {
-					// Target goes from 1 -> 0, so we go from 0 -> 1
-					crumb.TokenFrom, crumb.TokenTo = token0, token1
-				} else {
-					crumb.TokenFrom, crumb.TokenTo = token1, token0
-				}
-				copy(crumb.PoolId[:], poolAddr.Bytes())
-				crumbs = append(crumbs, crumb)
-			}
+		// } else if poolAddr, amountIn0, _, _, _ := getAmountsFromSwapLog(l); poolAddr != nil { // Hansel
+		// 	if poolInfo, ok := d.poolsInfo[*poolAddr]; ok {
+		// 		if poolInfo.Type != dexter.UniswapV2Pair && poolInfo.Type != dexter.SolidlyVolatilePool {
+		// 			return
+		// 		}
+		// 		token0, token1 := d.getUniswapPairTokens(poolAddr)
+		// 		crumb := hansel_lite.Breadcrumb{
+		// 			FeeNumerator: poolInfo.FeeNumerator,
+		// 			PoolType:     uint8(poolInfo.Type),
+		// 		}
+		// 		if amountIn0.BitLen() == 0 {
+		// 			// Target goes from 1 -> 0, so we go from 0 -> 1
+		// 			crumb.TokenFrom, crumb.TokenTo = token0, token1
+		// 		} else {
+		// 			crumb.TokenFrom, crumb.TokenTo = token1, token0
+		// 		}
+		// 		copy(crumb.PoolId[:], poolAddr.Bytes())
+		// 		crumbs = append(crumbs, crumb)
+		// 	}
 		}
 	})
 	for _, poolId := range updatedPools {
-		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs)
+		evm := d.getEvm(statedb, evmStateReader, lastBlockIdx)
 		var poolAddr common.Address = common.BytesToAddress(poolId[:20])
 		pool := d.getPoolTokensFromEvm(poolId, evm)
 		u := dexter.PoolUpdate{
@@ -1060,27 +1096,33 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		for i, tokAddr := range pool.Tokens {
 			u.Reserves[tokAddr] = pool.Balances[i]
 		}
-		ptx.Updates = append(ptx.Updates, u)
+		ptxUpdates = append(ptxUpdates, u)
 	}
-	if len(ptx.Updates) > 0 {
+	txWTL.Log.RecordTime(dexter.TxExecuteFinished)
+	if len(ptxUpdates) > 0 {
 		// runtime.LockOSThread()
 		for _, s := range d.strategies {
+			ptx := &dexter.PossibleTx{
+				Tx:           txWTL.Tx,
+				StartTime:    start,
+				Updates:      ptxUpdates,
+				Log:          make(dexter.TimeLog, len(dexter.TimingMomentLabels)),
+			}
+			copy(ptx.Log, txWTL.Log)
 			s.ProcessPossibleTx(ptx)
 		}
 		// runtime.UnlockOSThread()
 	}
 	if true || len(crumbs) == 0 { // No Hansel
-		d.evmState.mu.Unlock() // UNLOCK MUTEX
-		d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
+		d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, txWTL.Tx.Hash()})
 		return
 	}
-	d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, tx.Hash()})
-	evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs)
+	d.methodist.Record(dexter.MethodEvent{method, dexter.Pending, txWTL.Tx.Hash()})
+	evm := d.getEvm(statedb, evmStateReader, lastBlockIdx)
 	msg := d.readOnlyMessage(&hanselSearchAddr, hansel_lite.FindRoute(crumbs))
 	hanselStart := time.Now()
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
 	result, err := evmcore.ApplyMessage(evm, msg, gp)
-	d.evmState.mu.Unlock() // UNLOCK MUTEX
 	if err != nil {
 		log.Error("Hansel error", "err", err)
 		return
@@ -1090,7 +1132,7 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		return
 	}
 	profitFloat := dexter.BigIntToFloat(profit)
-	gasEstimate := dexter.BigIntToFloat(tx.GasPrice()) * GAS_HANSEL
+	gasEstimate := dexter.BigIntToFloat(txWTL.Tx.GasPrice()) * GAS_HANSEL
 	if profitFloat < gasEstimate {
 		return
 	}
@@ -1098,10 +1140,10 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 	d.prepAndFirePlan(&dexter.RailgunPacket{
 		Type:       dexter.HanselSwapLinear,
 		StrategyID: len(d.strategies),
-		Target:     tx,
+		Target:     txWTL.Tx,
 		Response: &dexter.Plan{
 			AmountIn:  startTokensIn,
-			GasPrice:  tx.GasPrice(),
+			GasPrice:  txWTL.Tx.GasPrice(),
 			GasCost:   dexter.FloatToBigInt(gasEstimate),
 			NetProfit: dexter.FloatToBigInt(profitFloat - gasEstimate),
 			MinProfit: dexter.FloatToBigInt(gasEstimate),
@@ -1112,67 +1154,6 @@ func (d *Dexter) processTx(tx *types.Transaction) {
 		StartTime:    start,
 	})
 }
-
-// func (d *Dexter) processEvent(txs []*types.Transaction) {
-// 	start := time.Now()
-// 	bs := d.svc.store.GetBlockState().Copy()
-// 	evmStateReader := &EvmStateReader{
-// 		ServiceFeed: &d.svc.feed,
-// 		store:       d.svc.store,
-// 	}
-// 	statedb, err := d.svc.store.evm.StateDB(bs.FinalizedStateRoot)
-// 	if err != nil {
-// 		log.Info("Could not make StateDB", "err", err)
-// 		return
-// 	}
-// 	evmProcessor := evmcore.NewStateProcessor(
-// 		d.svc.store.GetRules().EvmChainConfig(),
-// 		evmStateReader)
-// 	evmBlock := d.evmBlockWith(txs, &bs, evmStateReader)
-// 	var gasUsed uint64
-// 	ptx := &dexter.PossibleTx{
-// 		Tx:           tx,
-// 		ValidatorIDs: validatorIDs,
-// 		StartTime:    start,
-// 	}
-// 	var updatedPools []dexter.BalPoolId
-// 	evmProcessor.Process(evmBlock, statedb, opera.DefaultVMConfig, &gasUsed, false, func(l *types.Log, _ *state.StateDB) {
-// 		poolAddr, reserve0, reserve1 := getReservesFromSyncLog(l)
-// 		if poolAddr != nil {
-// 			if _, ok := d.interestedPairs[*poolAddr]; ok {
-// 				token0, token1 := d.getUniswapPairTokens(poolAddr)
-// 				ptx.Updates = append(ptx.Updates, dexter.PoolUpdate{
-// 					Addr:     *poolAddr,
-// 					Reserves: map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
-// 				})
-// 			}
-// 		} else if len(l.Topics) >= 2 && (bytes.Compare(l.Topics[0].Bytes(), swapBalancerEventTopic) == 0 || bytes.Compare(l.Topics[0].Bytes(), poolBalanceChangedEventTopic) == 0) {
-// 			var poolId dexter.BalPoolId
-// 			copy(poolId[:], l.Topics[1].Bytes())
-// 			updatedPools = append(updatedPools, poolId)
-// 			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
-// 		}
-// 	})
-// 	if len(ptx.Updates) == 0 && len(updatedPools) == 0 {
-// 		return
-// 	}
-// 	for _, poolId := range updatedPools {
-// 		evm := d.getEvm(statedb, evmStateReader, bs)
-// 		var poolAddr common.Address = common.BytesToAddress(poolId[:20])
-// 		pool := d.getPoolTokensFromEvm(poolId, evm)
-// 		u := dexter.PoolUpdate{
-// 			Addr:     poolAddr,
-// 			Reserves: make(map[common.Address]*big.Int),
-// 		}
-// 		for i, tokAddr := range pool.Tokens {
-// 			u.Reserves[tokAddr] = pool.Balances[i]
-// 		}
-// 		ptx.Updates = append(ptx.Updates, u)
-// 	}
-// 	for _, s := range d.strategies {
-// 		s.ProcessPossibleTx(ptx)
-// 	}
-// }
 
 func getReservesFromSyncLog(l *types.Log) (*common.Address, *big.Int, *big.Int) {
 	if len(l.Topics) != 1 || (bytes.Compare(l.Topics[0].Bytes(), syncEventTopic) != 0 && bytes.Compare(l.Topics[0].Bytes(), syncSolidlyEventTopic) != 0) {
@@ -1195,6 +1176,7 @@ func getAmountsFromSwapLog(l *types.Log) (*common.Address, *big.Int, *big.Int, *
 }
 
 func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
+	p.Log.RecordTime(dexter.PrepAndFirePlanStarted)
 	bravado := d.strategyBravado[p.StrategyID]
 	probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
 	failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
@@ -1207,6 +1189,7 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	validatorIDs := d.predictValidators(from, p.Target.Nonce(), d.validators, d.epoch, numValidators)
 	p.ValidatorIDs = validatorIDs
 	d.validatorMu.RUnlock()
+	p.Log.RecordTime(dexter.ValidatorsPredicted)
 	if len(validatorIDs) == 0 {
 		log.Warn("No predicted validators")
 		return
@@ -1233,7 +1216,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 		return
 	}
 	d.gunMu.Unlock() // UNLOCK MUTEX
+	p.Log.RecordTime(dexter.GunSelected)
 	nonce := d.svc.txpool.Nonce(account.Address)
+	p.Log.RecordTime(dexter.NonceLocated)
 	var callData []byte
 	var toAddr *common.Address
 	if p.Type == dexter.SwapSinglePath {
@@ -1263,7 +1248,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 			Data:      callData,
 		})
 	}
+	p.Log.RecordTime(dexter.ResponseTxCreated)
 	signedTx, err := wallet.SignTx(account, responseTx, d.svc.store.GetRules().EvmChainConfig().ChainID)
+	p.Log.RecordTime(dexter.ResponseTxSigned)
 	if err != nil {
 		log.Error("Could not sign tx", "err", err)
 		return
@@ -1277,13 +1264,19 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	}
 	lag := time.Now().Sub(p.Target.Time())
 	log.Info("FIRING GUN pew pew",
+		"profit", dexter.BigIntToFloat(p.Response.NetProfit)/1e18,
 		"lag", utils.PrettyDuration(time.Now().Sub(p.StartTime)),
 		"total", utils.PrettyDuration(lag),
 		"mtts", utils.PrettyDuration(d.mtts[p.StrategyID]),
 		"strategy", p.StrategyID,
 		"hash", signedTx.Hash().Hex(),
 		"gas", p.Response.GasPrice)
+	p.Log.RecordTime(dexter.GunFireStarted)
 	d.svc.handler.BroadcastTxsAggressive([]*types.Transaction{p.Target,signedTx})
+	p.Log.RecordTime(dexter.GunFireComplete)
+	var method [4]byte
+	copy(method[:], p.Target.Data()[:4])
+	fmt.Printf("Fired: %s source: %s  method: %v \n%s\n", signedTx.Hash().Hex(), p.Target.Hash().Hex(), method, p.Log.Format())
 	go d.accountFiredGun(wallet, signedTx, p, gun.ValidatorIDs, label, lag)
 }
 
@@ -1303,6 +1296,7 @@ func (d *Dexter) runRailgun() {
 			d.gunList = guns
 			d.gunMu.Unlock()
 		case p := <-d.railgunChan:
+			p.Log.RecordTime(dexter.RailgunReceived)
 			go d.prepAndFirePlan(p)
 		}
 	}
@@ -1351,6 +1345,7 @@ func (d *Dexter) accountFiredGun(wallet accounts.Wallet, signedTx *types.Transac
 	d.mu.Lock()
 	d.mtts[p.StrategyID] = time.Duration(float64(lag) * mttsAlpha + float64(d.mtts[p.StrategyID]) * (1-mttsAlpha))
 	d.numFired[p.StrategyID]++
+	d.numFiredThisBlock++
 	d.mu.Unlock()
 }
 
@@ -1421,7 +1416,7 @@ func (d *Dexter) watchEvents() {
 						log.Error("Could not get effective gas tip", "tx", tx, "err", err)
 					}
 					from, _ := types.Sender(d.signer, tx)
-					log.Info("TX in event block", "gasTip", effectiveGasTip, "size", tx.Size(), "from", from, "hash", tx.Hash().Hex(), "to", tx.To(), "label", txLabel)
+					log.Info("TX in event block", "gasTip", effectiveGasTip, "size", tx.Size(), "from", from, "to", tx.To(), "hash", tx.Hash().Hex(), "label", txLabel)
 				}
 			}
 			if lowestGas != 0 && len(e.Txs()) > 1 {
@@ -1600,30 +1595,30 @@ func (d *Dexter) getReadOnlyEvm() *vm.EVM {
 		log.Info("Could not make StateDB", "err", err)
 		return nil
 	}
-	return d.getEvm(statedb, evmStateReader, bs)
+	return d.getEvm(statedb, evmStateReader, bs.LastBlock.Idx)
 }
 
-func (d *Dexter) getEvm(statedb *state.StateDB, evmStateReader *EvmStateReader, bs iblockproc.BlockState) *vm.EVM {
+func (d *Dexter) getEvm(statedb *state.StateDB, evmStateReader *EvmStateReader, lastBlockIdx idx.Block) *vm.EVM {
 	vmConfig := &opera.DefaultVMConfig
 	txContext := vm.TxContext{
 		Origin:   nullAddr,
 		GasPrice: new(big.Int),
 	}
-	header := d.evmHeader(&bs, evmStateReader)
+	header := d.evmHeader(lastBlockIdx, evmStateReader)
 	context := evmcore.NewEVMBlockContext(header, evmStateReader, nil)
 	config := d.svc.store.GetRules().EvmChainConfig()
 	return vm.NewEVM(context, txContext, statedb, config, *vmConfig)
 }
 
-func (d *Dexter) evmHeader(bs *iblockproc.BlockState, reader evmcore.DummyChain) *evmcore.EvmHeader {
+func (d *Dexter) evmHeader(lastBlockIdx idx.Block, reader evmcore.DummyChain) *evmcore.EvmHeader {
 	baseFee := d.svc.store.GetRules().Economy.MinGasPrice
 	if !d.svc.store.GetRules().Upgrades.London {
 		baseFee = nil
 	}
 	return &evmcore.EvmHeader{
-		Number:     utils.U64toBig(uint64(bs.LastBlock.Idx + 1)),
+		Number:     utils.U64toBig(uint64(lastBlockIdx + 1)),
 		Hash:       common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		ParentHash: reader.GetHeader(common.Hash{}, uint64(bs.LastBlock.Idx)).Hash,
+		ParentHash: reader.GetHeader(common.Hash{}, uint64(lastBlockIdx)).Hash,
 		Root:       common.Hash{},
 		Time:       inter.Timestamp(uint64(time.Now().UnixNano())),
 		Coinbase:   common.Address{},
@@ -1633,44 +1628,15 @@ func (d *Dexter) evmHeader(bs *iblockproc.BlockState, reader evmcore.DummyChain)
 	}
 }
 
-func (d *Dexter) evmBlockWith(txs types.Transactions, bs *iblockproc.BlockState, reader evmcore.DummyChain) *evmcore.EvmBlock {
-	return evmcore.NewEvmBlock(d.evmHeader(bs, reader), txs)
+func (d *Dexter) evmBlockWith(txs types.Transactions, lastBlockIdx idx.Block, reader evmcore.DummyChain) *evmcore.EvmBlock {
+	return evmcore.NewEvmBlock(d.evmHeader(lastBlockIdx, reader), txs)
 }
 
 func (d *Dexter) updateMethods() {
 	for {
 		time.Sleep(60 * time.Second)
-		white, black := d.methodist.GetLists()
-		d.svc.txpool.UpdateMethods(white, black)
+		var black []dexter.Method
+		_, black = d.methodist.GetLists()
+		d.svc.txpool.UpdateMethods(nil, black)
 	}
 }
-
-// func (d *Dexter) runTokenWhitelister() {
-// 	whitelist := make(map[common.Address]int)
-// 	for i := 0; ; i++ {
-// 		addr := <-d.tokenWhitelistChan
-// 		if cnt, ok := whitelist[addr]; ok {
-// 			whitelist[addr] = cnt + 1
-// 		} else {
-// 			whitelist[addr] = cnt + 1
-// 		}
-// 		if i%1000 == 0 {
-// 			whitelistJson := make(map[string]int)
-// 			for addr, cnt := range whitelist {
-// 				whitelistJson[addr.Hex()] = cnt
-// 			}
-// 			log.Info("Dumping token whitelist", "len1", len(whitelist), "len2", len(whitelistJson))
-// 			file, err := os.OpenFile(root+"/data/arbitrageur_token_whitelist.json", os.O_CREATE|os.O_WRONLY, os.ModePerm)
-// 			if err != nil {
-// 				log.Error("Could not open arbitrageur whitelist file", "err", err)
-// 				continue
-// 			}
-// 			encoder := json.NewEncoder(file)
-// 			err = encoder.Encode(whitelistJson)
-// 			if err != nil {
-// 				log.Error("JSON encoding error", "err", err)
-// 			}
-// 			file.Close()
-// 		}
-// 	}
-// }

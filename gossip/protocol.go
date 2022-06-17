@@ -118,8 +118,9 @@ type TxPool interface {
 	Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	ContentFrom(addr common.Address) (types.Transactions, types.Transactions)
 	NumFrom(addr common.Address) int
-	AttachDexter(c chan *types.Transaction, f chan common.Address)
+	AttachDexter(c chan *dexter.TxWithTimeLog, f chan common.Address)
 	UpdateMethods(white, black []dexter.Method)
+	SetToBlacklist(map[common.Address]string)
 }
 
 // handshakeData is the network packet for the initial handshake message
