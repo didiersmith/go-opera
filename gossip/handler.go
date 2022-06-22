@@ -1518,12 +1518,24 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 }
 
 // Dexter
-func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
-	// peers := h.peers.GetSortedPeers()
-	peers := h.peers.List()
-	if len(peers) == 0 {
-		peers = h.peers.List()
-	}
+type BroadcastTargets int
+
+const (
+	BroadcastAll BroadcastTargets = iota
+	BroadcastTrusted
+	BroadcastNonTrusted
+)
+
+func (h *handler) BroadcastTxsAggressive(txs types.Transactions, targets BroadcastTargets, pids []string) {
+	peers := h.peers.GetSortedPeers(targets, pids)
+	// var peers []*peer
+	// if targets == BroadcastAll {
+	// 	peers = h.peers.List()
+	// } else if targets == BroadcastNonTrusted {
+	// 	peers = h.peers.ListNonTrusted()
+	// } else {
+	// 	peers = h.peers.ListTrusted()
+	// }
 	totalSize := common.StorageSize(0)
 	for _, tx := range txs {
 		totalSize += tx.Size()

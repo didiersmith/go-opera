@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/hansel_lite"
 	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
@@ -28,7 +28,7 @@ var (
 	halfIn                     = 5e20
 	kiloIn                     = 1e21
 	MaxAmountIn                = new(big.Int).Mul(big.NewInt(2547), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-	minChangeFrac              = 0.0001
+	minChangeFrac              = 0.00001
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 	// GAS_INITIAL  = 0
 	// GAS_TRANSFER = 0
 	// GAS_SWAP     = 0
-	GAS_FAIL = 300000 * 3
+	GAS_FAIL = 300000
 )
 
 type FishCallType int
@@ -69,8 +69,10 @@ const (
 	DexterReceived
 	ProcessTxStarted
 	EvmStateCopyStarted
+	EvmStateCopyFinished
 	TxExecuteStarted
 	TxExecuteFinished
+	TxPoolReservesUpdated
 	StrategyStarted
 	StrategyFinished
 	RailgunReceived
@@ -92,8 +94,10 @@ var TimingMomentLabels = []string{
 	"DexterReceived         ",
 	"ProcessTxStarted       ",
 	"EvmStateCopyStarted    ",
+	"EvmStateCopyFinished   ",
 	"TxExecuteStarted       ",
 	"TxExecuteFinished      ",
+	"TxPoolReservesUpdated  ",
 	"StrategyStarted        ",
 	"StrategyFinished       ",
 	"RailgunReceived        ",
@@ -125,7 +129,7 @@ func (log TimeLog) Format() string {
 	p := message.NewPrinter(language.English)
 	for moment, t := range log {
 		diff := t.Sub(prev)
-		if diff > 300*time.Microsecond {
+		if diff > 200*time.Microsecond {
 			a = append(a, p.Sprintf("%s: %d µs", TimingMomentLabels[moment], diff.Microseconds()))
 		}
 		prev = t
@@ -138,7 +142,7 @@ type TxWithTimeLog struct {
 	Log TimeLog
 }
 
-var ScoreTiers = []float64{1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
+var ScoreTiers = []float64{10000 * 1e18, 1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
 
 type PoolKey [60]byte
 type EdgeKey [40]byte
@@ -222,6 +226,7 @@ type Strategy interface {
 	SetGasPrice(gasPrice int64)
 	Start()
 	AddSubStrategy(Strategy)
+	GetName() string
 }
 
 type Plan struct {
@@ -230,7 +235,7 @@ type Plan struct {
 	GasCost   *big.Int
 	NetProfit *big.Int
 	MinProfit *big.Int
-	Path      []fish5_lite.LinearSwapCommand
+	Path      []fish7_lite.Breadcrumb
 	RouteIdx  uint
 	Reserves  []ReserveInfo
 }

@@ -144,7 +144,8 @@ var (
 	}
 	fishMethods = [][4]byte{
 		[4]byte{0x3f, 0xc7, 0x1f, 0x8c}, // Hansel swapLinear
-		[4]byte{0xf5, 0x19, 0x6f, 0x14}, // Fish swapLinear
+		[4]byte{0xf5, 0x19, 0x6f, 0x14}, // Fish5 swapLinear
+		[4]byte{0x66, 0x04, 0xae, 0xf1}, // Fish7 swapLinear
 	}
 	specialMethods = [][4]byte{
 		[4]byte{10, 242, 16, 161},
@@ -354,7 +355,7 @@ type TxPool struct {
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 
 	dexterTxChan           chan *dexter.TxWithTimeLog
-	dexterFriendlyFireChan chan common.Address
+	dexterFriendlyFireChan chan *types.Transaction
 	specialMethods         map[[4]byte]struct{}
 	specialMethodsMu       sync.RWMutex
 	toBlacklist            map[common.Address]struct{}
@@ -425,7 +426,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 	return pool
 }
 
-func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan common.Address) {
+func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan *types.Transaction) {
 	pool.dexterTxChan = c
 	pool.dexterFriendlyFireChan = f
 }
@@ -449,10 +450,8 @@ func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
 	}
 }
 
-func (pool *TxPool) SetToBlacklist(addrs map[common.Address]string) {
-	for a, _ := range addrs {
-		pool.toBlacklist[a] = struct{}{}
-	}
+func (pool *TxPool) SetToBlacklist(addrs map[common.Address]struct{}) {
+	pool.toBlacklist = addrs
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -1093,7 +1092,7 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		return errs
 	}
 
-	if pool.dexterTxChan != nil {
+	if pool.dexterTxChan != nil && !local {
 		for _, tx := range news {
 			interest := pool.hackCheckIncomingTx(tx)
 			if interest == PotentialTarget {
@@ -1102,11 +1101,11 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 				select {
 				case pool.dexterTxChan <- &txWTL:
 				default:
+					log.Info("dexterTxChan full", "len", len(pool.dexterTxChan))
 				}
 			} else if interest == DexterFriendlyFire {
-				from, _ := types.Sender(pool.signer, tx)
 				select {
-				case pool.dexterFriendlyFireChan <- from:
+				case pool.dexterFriendlyFireChan <- tx:
 				default:
 				}
 			}

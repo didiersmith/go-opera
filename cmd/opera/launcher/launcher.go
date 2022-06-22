@@ -261,6 +261,13 @@ func lachesisMain(ctx *cli.Context) error {
 	//}
 	//defer tracingStop()
 
+	// nodeType, ok := os.LookupEnv("DEXTER_NODE_TYPE")
+	// if ok && nodeType == "SCOUT" {
+	// node, _, nodeClose := makeScoutNode(ctx, cfg)
+	// defer nodeClose()
+	// startScoutNode(ctx, node)
+	// node.Wait()
+	// }
 	cfg := makeAllConfigs(ctx)
 	genesisPath := getOperaGenesis(ctx)
 	node, _, nodeClose := makeNode(ctx, cfg, genesisPath)
@@ -269,6 +276,27 @@ func lachesisMain(ctx *cli.Context) error {
 	node.Wait()
 	return nil
 }
+
+// func makeScoutNode(ctx *cli.Context, cfg *config) (*node.Node, *gossip.Service, func()) {
+// 	stack := makeConfigNode(ctx, &cfg.Node)
+// 	svc, err := gossip.NewService(stack, cfg.Opera, gdb, blockProc, engine, dagIndex, newTxPool)
+// 	if err != nil {
+// 		utils.Fatalf("Failed to create the service: %v", err)
+// 	}
+// 	err = engine.Bootstrap(svc.GetConsensusCallbacks())
+// 	if err != nil {
+// 		utils.Fatalf("Failed to bootstrap the engine: %v", err)
+// 	}
+// 	stack.RegisterAPIs(svc.APIs())
+// 	stack.RegisterProtocols(svc.Protocols())
+// 	stack.RegisterLifecycle(svc)
+// 	return stack, svc, func() {
+// 		_ = stack.Close()
+// 		gdb.Close()
+// 		_ = cdb.Close()
+// 		genesisStore.Close()
+// 	}
+// }
 
 func makeNode(ctx *cli.Context, cfg *config, genesis integration.InputGenesis) (*node.Node, *gossip.Service, func()) {
 	// check errlock file

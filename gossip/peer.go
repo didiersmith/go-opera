@@ -131,6 +131,11 @@ func (p *peer) broadcast(queue, fastQueue chan broadcastItem) {
 			_ = p2p.Send(p.rw, item.Code, item.Raw)
 
 		case item := <-queue:
+			select {
+			case priorityItem := <-fastQueue:
+				_ = p2p.Send(p.rw, priorityItem.Code, priorityItem.Raw)
+			default:
+			}
 			_ = p2p.Send(p.rw, item.Code, item.Raw)
 			p.queuedDataSemaphore.Release(memSize(item.Raw))
 
