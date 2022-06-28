@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/hansel_lite"
+	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 var (
@@ -24,6 +28,7 @@ var (
 	halfIn                     = 5e20
 	kiloIn                     = 1e21
 	MaxAmountIn                = new(big.Int).Mul(big.NewInt(2547), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	minChangeFrac              = 0.00001
 )
 
 const (
@@ -59,7 +64,88 @@ const (
 	CurveFactoryMetaPool           = iota
 )
 
-var ScoreTiers = []float64{1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
+type TimingMoment int
+
+const (
+	TxCreated TimingMoment = iota
+	TxPoolDetected
+	DexterReceived
+	ProcessTxStarted
+	EvmStateCopyStarted
+	EvmStateCopyFinished
+	TxExecuteStarted
+	TxExecuteFinished
+	TxPoolReservesUpdated
+	StrategyStarted
+	StrategyFinished
+	RailgunReceived
+	PrepAndFirePlanStarted
+	ValidatorsPredicted
+	GunSelected
+
+	NonceLocated
+	ResponseTxCreated
+	ResponseTxSigned
+
+	GunFireStarted
+	GunFireComplete
+)
+
+var TimingMomentLabels = []string{
+	"TxCreated              ",
+	"TxPoolDetected         ",
+	"DexterReceived         ",
+	"ProcessTxStarted       ",
+	"EvmStateCopyStarted    ",
+	"EvmStateCopyFinished   ",
+	"TxExecuteStarted       ",
+	"TxExecuteFinished      ",
+	"TxPoolReservesUpdated  ",
+	"StrategyStarted        ",
+	"StrategyFinished       ",
+	"RailgunReceived        ",
+	"PrepAndFirePlanStarted ",
+	"ValidatorsPredicted    ",
+	"GunSelected            ",
+	"NonceLocated           ",
+	"ResponseTxCreated      ",
+	"ResponseTxSigned       ",
+	"GunFireStarted         ",
+	"GunFireComplete        ",
+}
+
+type TimeLog []time.Time
+
+func NewTimeLog(txCreatedTime time.Time) TimeLog {
+	log := make(TimeLog, len(TimingMomentLabels))
+	log[TxCreated] = txCreatedTime
+	return log
+}
+
+func (log TimeLog) RecordTime(moment TimingMoment) {
+	log[moment] = time.Now()
+}
+
+func (log TimeLog) Format() string {
+	var a []string
+	prev := log[0]
+	p := message.NewPrinter(language.English)
+	for moment, t := range log {
+		diff := t.Sub(prev)
+		if diff > 200*time.Microsecond {
+			a = append(a, p.Sprintf("%s: %d µs", TimingMomentLabels[moment], diff.Microseconds()))
+		}
+		prev = t
+	}
+	return strings.Join(a, "\n") + "\nTotal                  " + utils.PrettyDuration(log[GunFireComplete].Sub(log[TxCreated])).String()
+}
+
+type TxWithTimeLog struct {
+	Tx  *types.Transaction
+	Log TimeLog
+}
+
+var ScoreTiers = []float64{10000 * 1e18, 1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
 
 type PoolKey [60]byte
 type EdgeKey [40]byte
@@ -68,6 +154,7 @@ type BalPoolId [32]byte
 type PossibleTx struct {
 	Tx             *types.Transaction
 	StartTime      time.Time
+	Log            TimeLog
 	Updates        []PoolUpdate
 	AvoidPoolAddrs []*common.Address
 	ValidatorIDs   []idx.ValidatorID
@@ -142,6 +229,7 @@ type Strategy interface {
 	SetGasPrice(gasPrice int64)
 	Start()
 	AddSubStrategy(Strategy)
+	GetName() string
 }
 
 type Plan struct {
@@ -150,7 +238,7 @@ type Plan struct {
 	GasCost   *big.Int
 	NetProfit *big.Int
 	MinProfit *big.Int
-	Path      []fish5_lite.LinearSwapCommand
+	Path      []fish7_lite.Breadcrumb
 	RouteIdx  uint
 	Reserves  []ReserveInfo
 }
@@ -234,6 +322,7 @@ type RailgunPacket struct {
 	HanselResponse *HanselPlan
 	ValidatorIDs   []idx.ValidatorID
 	StartTime      time.Time
+	Log            TimeLog
 }
 
 type ReserveInfo struct {

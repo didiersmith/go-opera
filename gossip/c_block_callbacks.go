@@ -428,7 +428,7 @@ func consensusCallbackBeginBlockFn(
 					blockInsertTimer.UpdateSince(start)
 
 					now := time.Now()
-					if blockCtx.Idx%60 == 0 {
+					if blockCtx.Idx%10 == 0 {
 						log.Info("New block", "index", blockCtx.Idx, "id", block.Atropos, "gas_used",
 							evmBlock.GasUsed, "txs", fmt.Sprintf("%d/%d", len(evmBlock.Transactions), len(block.SkippedTxs)),
 							"age", utils.PrettyDuration(now.Sub(block.Time.Time())), "t", utils.PrettyDuration(now.Sub(start)))

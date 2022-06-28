@@ -81,20 +81,25 @@ func (ps *peerSet) SetSortedPeers(sortedPeers []string) {
 }
 
 // Dexter
-func (ps *peerSet) GetSortedPeers() []*peer {
+func (ps *peerSet) GetSortedPeers(targets BroadcastTargets, pids []string) []*peer {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
-	list := make([]*peer, 0, len(ps.sortedPeers))
-	marked := make(map[string]struct{})
-	for _, id := range ps.sortedPeers {
-		if peer, ok := ps.peers[id]; ok {
-			list = append(list, peer)
-			marked[id] = struct{}{}
+	list := make([]*peer, 0, len(pids))
+	if len(pids) == 0 {
+		for _, p := range ps.peers {
+			isTrusted := p.IsTrusted()
+			if targets == BroadcastAll || (targets == BroadcastTrusted && isTrusted) || (targets == BroadcastNonTrusted && !isTrusted) {
+				list = append(list, p)
+			}
 		}
+		return list
 	}
-	for id, p := range ps.peers {
-		if _, ok := marked[id]; !ok {
-			list = append(list, p)
+	for _, id := range pids {
+		if peer, ok := ps.peers[id]; ok {
+			isTrusted := peer.IsTrusted()
+			if targets == BroadcastAll || (targets == BroadcastTrusted && isTrusted) || (targets == BroadcastNonTrusted && !isTrusted) {
+				list = append(list, peer)
+			}
 		}
 	}
 	return list
@@ -302,6 +307,32 @@ func (ps *peerSet) List() []*peer {
 	list := make([]*peer, 0, len(ps.peers))
 	for _, p := range ps.peers {
 		list = append(list, p)
+	}
+	return list
+}
+
+// ListNonTrusted returns array of non-trusted peers in the set.
+func (ps *peerSet) ListNonTrusted() []*peer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	list := make([]*peer, 0, len(ps.peers))
+	for _, p := range ps.peers {
+		if !p.Peer.IsTrusted() {
+			list = append(list, p)
+		}
+	}
+	return list
+}
+
+// ListTrusted returns array of trusted peers in the set.
+func (ps *peerSet) ListTrusted() []*peer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	list := make([]*peer, 0, len(ps.peers))
+	for _, p := range ps.peers {
+		if p.Peer.IsTrusted() {
+			list = append(list, p)
+		}
 	}
 	return list
 }

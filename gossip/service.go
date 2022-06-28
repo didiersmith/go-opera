@@ -177,6 +177,7 @@ func NewService(stack *node.Node, config Config, store *Store, blockProc BlockPr
 	svc.eventMux = stack.EventMux()
 	// Create the net API service
 	svc.netRPCService = ethapi.NewPublicNetAPI(svc.p2pServer, store.GetRules().NetworkID)
+	go svc.dexter.AddTrustedNodes()
 
 	return svc, nil
 }

@@ -877,13 +877,13 @@ func (h *handler) handleTxHashes(p *peer, announces []common.Hash) {
 	// Mark the hashes as present at the remote node
 	for _, id := range announces {
 		p.MarkTransaction(id)
-		if h.txRaceChan != nil {
-			h.txRaceChan <- &RaceEntry{
-				Hash:   id,
-				PeerID: p.id,
-				T:      time.Now(),
-			}
-		}
+		// if h.txRaceChan != nil {
+		// 	h.txRaceChan <- &RaceEntry{
+		// 		Hash:   id,
+		// 		PeerID: p.id,
+		// 		T:      time.Now(),
+		// 	}
+		// }
 	}
 	// Schedule all the unknown hashes for retrieval
 	requestTransactions := func(ids []interface{}) error {
@@ -907,27 +907,21 @@ func (h *handler) AttachDexter(c chan *types.Transaction) {
 
 func (h *handler) handleTxs(p *peer, txs types.Transactions) {
 	// Mark the hashes as present at the remote node
+	h.txpool.AddRemotes(txs)
 	for _, tx := range txs {
 		p.MarkTransaction(tx.Hash())
-		if h.txRaceChan != nil {
-			h.txRaceChan <- &RaceEntry{
-				Hash:   tx.Hash(),
-				PeerID: p.id,
-				T:      time.Now(),
-				Full:   true,
-			}
-		}
-		// to := tx.To()
-		// if to != nil {
-		// 	toBytes := to.Bytes()
-		// 	for _, cmp := range special {
-		// 		if bytes.Compare(cmp, toBytes) == 0 {
-		// 			log.Info("Found tx on watched addr", "to", to, "hash", tx.Hash())
-		// 		}
+		// if h.txRaceChan != nil {
+		// 	select {
+		// 	case h.txRaceChan <- &RaceEntry{
+		// 		Hash:   tx.Hash(),
+		// 		PeerID: p.id,
+		// 		T:      time.Now(),
+		// 		Full:   true,
+		// 	}:
+		// 	default:
 		// 	}
 		// }
 	}
-	h.txpool.AddRemotes(txs)
 }
 
 func (h *handler) handleEventHashes(p *peer, announces hash.Events) {
@@ -935,9 +929,12 @@ func (h *handler) handleEventHashes(p *peer, announces hash.Events) {
 	for _, id := range announces {
 		p.MarkEvent(id)
 		if h.eventRaceChan != nil {
-			h.eventRaceChan <- &RaceEntry{
+			select {
+			case h.eventRaceChan <- &RaceEntry{
 				Hash:   (common.Hash)(id),
 				PeerID: p.id,
+			}:
+			default:
 			}
 		}
 	}
@@ -968,9 +965,12 @@ func (h *handler) handleEvents(p *peer, events dag.Events, ordered bool) {
 	for _, e := range events {
 		p.MarkEvent(e.ID())
 		if h.eventRaceChan != nil {
-			h.eventRaceChan <- &RaceEntry{
+			select {
+			case h.eventRaceChan <- &RaceEntry{
 				Hash:   (common.Hash)(e.ID()),
 				PeerID: p.id,
+			}:
+			default:
 			}
 		}
 	}
@@ -1518,12 +1518,24 @@ func (h *handler) BroadcastTxs(txs types.Transactions) {
 }
 
 // Dexter
-func (h *handler) BroadcastTxsAggressive(txs types.Transactions) {
-	// peers := h.peers.GetSortedPeers()
-	peers := h.peers.List()
-	if len(peers) == 0 {
-		peers = h.peers.List()
-	}
+type BroadcastTargets int
+
+const (
+	BroadcastAll BroadcastTargets = iota
+	BroadcastTrusted
+	BroadcastNonTrusted
+)
+
+func (h *handler) BroadcastTxsAggressive(txs types.Transactions, targets BroadcastTargets, pids []string) {
+	peers := h.peers.GetSortedPeers(targets, pids)
+	// var peers []*peer
+	// if targets == BroadcastAll {
+	// 	peers = h.peers.List()
+	// } else if targets == BroadcastNonTrusted {
+	// 	peers = h.peers.ListNonTrusted()
+	// } else {
+	// 	peers = h.peers.ListTrusted()
+	// }
 	totalSize := common.StorageSize(0)
 	for _, tx := range txs {
 		totalSize += tx.Size()

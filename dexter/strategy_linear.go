@@ -1,7 +1,6 @@
 package dexter
 
 import (
-	"bytes"
 	"container/heap"
 	"encoding/json"
 	"io/ioutil"
@@ -13,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
 	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -91,6 +90,10 @@ func (s *LinearStrategy) SetEdgePools(edgePools map[EdgeKey][]common.Address) {
 
 func (s *LinearStrategy) SetGasPrice(gasPrice int64) {
 	s.gasPrice = gasPrice
+}
+
+func (s *LinearStrategy) GetName() string {
+	return s.Name
 }
 
 func (s *LinearStrategy) ProcessPossibleTx(t *PossibleTx) {
@@ -186,7 +189,7 @@ func (s *LinearStrategy) loadJson() {
 	s.routeCache = routeCache
 }
 
-func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
+func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFraction float64) *PoolInfoFloat {
 	s.mu.RLock()
 	poolInfo, ok := s.poolsInfo[p.Addr]
 	s.mu.RUnlock()
@@ -198,7 +201,8 @@ func (s *LinearStrategy) makePoolInfoFloat(p *PoolUpdate) *PoolInfoFloat {
 	for a, r := range p.Reserves {
 		rf := BigIntToFloat(r)
 		reserves[a] = rf
-		if !updated && rf != poolInfo.Reserves[a] {
+		prevReserve := poolInfo.Reserves[a]
+		if math.Abs(rf-prevReserve) > minChangeFraction*prevReserve {
 			updated = true
 		}
 	}
@@ -237,7 +241,7 @@ func (s *LinearStrategy) runStateUpdater() {
 			}
 		}
 		for addr, update := range batch.PermUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -253,7 +257,7 @@ func (s *LinearStrategy) runStateUpdater() {
 			s.mu.RUnlock()
 		}
 		for addr, update := range u.PendingUpdates {
-			poolInfo := s.makePoolInfoFloat(update)
+			poolInfo := s.makePoolInfoFloat(update, 0)
 			if poolInfo == nil {
 				continue
 			}
@@ -360,11 +364,12 @@ func (s *LinearStrategy) getRouteAmountOut(route []*Leg, amountIn float64, pools
 }
 
 func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
+	ptx.Log.RecordTime(StrategyStarted)
 	start := time.Now()
 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
 	var updatedKeys []PoolKey
 	for _, u := range ptx.Updates {
-		poolInfo := s.makePoolInfoFloat(&u)
+		poolInfo := s.makePoolInfoFloat(&u, minChangeFrac)
 		if poolInfo == nil {
 			continue
 		}
@@ -398,6 +403,7 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		return
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
+	ptx.Log.RecordTime(StrategyFinished)
 	log.Info("strategy_linear final route", "strategy", s.Name, "profitable", len(allProfitableRoutes), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "profit", BigIntToFloat(plan.NetProfit)/1e18)
 	// for i, leg := range plan.Path {
 	// 	poolInfo := getPoolInfo(s.poolsInfo, poolsInfoOverride, leg.Pair)
@@ -411,6 +417,7 @@ func (s *LinearStrategy) processPotentialTx(ptx *PossibleTx) {
 		Response:     plan,
 		ValidatorIDs: ptx.ValidatorIDs,
 		StartTime:    ptx.StartTime,
+		Log:          ptx.Log,
 	}
 }
 
@@ -538,18 +545,16 @@ func (s *LinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netProfit fl
 		NetProfit: FloatToBigInt(netProfit),
 		MinProfit: FloatToBigInt(minProfit),
 		AmountIn:  FloatToBigInt(startAmountIn),
-		Path:      make([]fish5_lite.LinearSwapCommand, len(route)),
+		Path:      make([]fish7_lite.Breadcrumb, len(route)),
 	}
 	for i, leg := range route {
 		s.mu.RLock()
 		poolInfo := s.poolsInfo[leg.PoolAddr] // No need to use override as we don't look up reserves
 		s.mu.RUnlock()
-		fromToken0 := bytes.Compare(poolInfo.Tokens[0].Bytes(), leg.From.Bytes()) == 0
-		plan.Path[i] = fish5_lite.LinearSwapCommand{
-			Token0:       poolInfo.Tokens[0],
-			Token1:       poolInfo.Tokens[1],
+		plan.Path[i] = fish7_lite.Breadcrumb{
+			TokenFrom:    leg.From,
+			TokenTo:      leg.To,
 			FeeNumerator: poolInfo.FeeNumeratorBI,
-			FromToken0:   fromToken0,
 			PoolType:     uint8(leg.Type),
 		}
 		copy(plan.Path[i].PoolId[:], leg.PoolAddr.Bytes())
