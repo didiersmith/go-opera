@@ -312,36 +312,19 @@ func NewDexter(svc *Service) *Dexter {
 	d.validators, d.epoch = d.svc.store.GetEpochValidators()
 	if d.nodeType == GENERAL {
 		d.strategies = []dexter.Strategy{
-			// dexter.NewLinearStrategy("Linear 2-3", 0, d.railgunChan, dexter.LinearStrategyConfig{
-			// 	RoutesFileName:          root + "route_caches/solidly_routes_len2-3.json",
-			// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-3.json",
-			// }),
+			dexter.NewLinearStrategy("Linear 2-3", 0, d.railgunChan, dexter.LinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/solidly_routes_len2-3.json",
+				PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-3.json",
+			}),
 
-			// dexter.NewBalancerLinearStrategy("Balancer 2-3 combined", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-			// 	RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
-			// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
-			// }),
+			dexter.NewBalancerLinearStrategy("Balancer 2-3 combined", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
+				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
+			}),
 
-			dexter.NewBalancerLinearStrategy("Curve 2-4", 0, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			dexter.NewBalancerLinearStrategy("Curve 2-4", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/curve_plain_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/curve_plain_poolToRouteIdxs_len2-4.json",
-			}),
-		}
-	} else if d.nodeType == PHILOSOPHER {
-		d.strategies = []dexter.Strategy{
-			dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_routes_len2-4.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
-			}),
-
-			dexter.NewBalancerLinearStrategy("Balancer 2-3 Sans", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/balancer_stable_no_wftm_poolToRouteIdxs_len2-3.json",
-				PoolToRouteIdxsFileName: root + "route_caches/balancer_stable_no_wftm_routes_len2-3.json",
-			}),
-
-			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 			}),
 		}
 	} else if d.nodeType == BIGGUNS {
@@ -368,6 +351,11 @@ func NewDexter(svc *Service) *Dexter {
 			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
+			}),
+
+			dexter.NewBalancerLinearStrategy("Curve 2-4", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/curve_plain_routes_len2-4.json",
+				PoolToRouteIdxsFileName: root + "route_caches/curve_plain_poolToRouteIdxs_len2-4.json",
 			}),
 		}
 	}
