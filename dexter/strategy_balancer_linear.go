@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
 	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -71,11 +71,16 @@ func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*Pool
 		reserves := make(map[common.Address]float64)
 		weights := make(map[common.Address]float64)
 		scaleFactors := make(map[common.Address]float64)
+		var fee float64
 		for a, r := range v.Reserves {
 			scaleFactors[a] = BigIntToFloat(v.ScaleFactors[a])
 			weights[a] = BigIntToFloat(v.Weights[a])
 			if v.Type == BalancerWeightedPool || v.Type == BalancerStablePool {
 				reserves[a] = upScale(BigIntToFloat(r), scaleFactors[a])
+				fee = BigIntToFloat(v.Fee) / 1e18
+			} else if v.Type == CurveBasePlainPool || v.Type == CurveFactoryPlainPool {
+				reserves[a] = upScale(BigIntToFloat(r), scaleFactors[a])
+				fee = BigIntToFloat(v.Fee) / 1e10
 			} else {
 				reserves[a] = BigIntToFloat(r)
 			}
@@ -88,7 +93,7 @@ func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*Pool
 			ScaleFactors:       scaleFactors,
 			FeeNumerator:       BigIntToFloat(v.FeeNumerator),
 			FeeNumeratorBI:     v.FeeNumerator,
-			Fee:                BigIntToFloat(v.Fee) / 1e18,
+			Fee:                fee,
 			FeeBI:              v.Fee,
 			LastUpdate:         time.Now(),
 			AmplificationParam: BigIntToFloat(v.AmplificationParam),
@@ -184,15 +189,14 @@ func (s *BalancerLinearStrategy) loadJson() {
 				t = BalancerStablePool
 				s.interestedPools[poolId] = t
 			} else if leg.ExchangeType == "curveBasePlainPool" {
-				log.Info("Adding curve pool")
+				// log.Info("Found curve plain pool")
 				t = CurveBasePlainPool
 				s.interestedPools[poolId] = t
 			} else if leg.ExchangeType == "curveFactoryPlainPool" {
-				log.Info("Adding curve pool")
 				t = CurveFactoryPlainPool
 				s.interestedPools[poolId] = t
 			} else if leg.ExchangeType == "curveFactoryMetaPool" {
-				log.Info("Adding curve pool")
+				// log.Info("Found curve factory meta pool")
 				t = CurveFactoryMetaPool
 				s.interestedPools[poolId] = t
 			} else {
@@ -219,7 +223,7 @@ func (s *BalancerLinearStrategy) loadJson() {
 			copy(routeCache.PoolToRouteIdxs[key][i], routeIdxs)
 		}
 	}
-	log.Info("Processed route cache", "name", s.Name)
+	log.Info("Processed route cache", "name", s.Name, "interested pools", len(s.interestedPools))
 	s.routeCache = routeCache
 }
 
@@ -237,23 +241,37 @@ func (s *BalancerLinearStrategy) getRouteAmountOutBalancer(
 		if leg.Type == UniswapV2Pair || leg.Type == SolidlyVolatilePool {
 			amountOut = getAmountOutUniswapFloat(amountIn, reserveFrom, reserveTo, poolInfo.FeeNumerator)
 			if debug {
-				fmt.Printf("Leg: uniswap, i: %d, addr: %s, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amountIn: %f, amountOut: %f\n", i, leg.PoolAddr, reserveFrom, reserveTo, poolInfo.FeeNumerator, amountIn, amountOut)
+				fmt.Printf("Leg: uniswap, i: %d, addr: %s, fromAddr: %s, toAddr: %s, amountIn: %f, amountOut: %f\n", i, leg.PoolAddr, leg.From, leg.To, amountIn, amountOut)
+				// fmt.Printf("Leg: uniswap, i: %d, addr: %s, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amountIn: %f, amountOut: %f\n", i, leg.PoolAddr, reserveFrom, reserveTo, poolInfo.FeeNumerator, amountIn, amountOut)
 			}
 		} else if leg.Type == BalancerWeightedPool {
 			weightFrom, weightTo := poolInfo.Weights[leg.From], poolInfo.Weights[leg.To]
 			amountOut = getAmountOutBalancer(amountIn, reserveFrom, reserveTo, weightFrom, weightTo, poolInfo.Fee, poolInfo.ScaleFactors[leg.From], poolInfo.ScaleFactors[leg.To])
 			if debug {
-				fmt.Printf("Leg: balancerWeightedPool, i: %d, reserveFrom: %f, reserveTo: %f, weightFrom: %f, weightTo: %f, feeNumerator: %f, amountIn: %f, amountOut: %f\n", i, reserveFrom, reserveTo, weightFrom, weightTo, poolInfo.Fee, amountIn, amountOut)
+				fmt.Printf("Leg: balancerWeightedPool, i: %d, fromAddr: %s, toAddr: %s, amountIn: %f, amountOut: %f\n", i, leg.From, leg.To, amountIn, amountOut)
+				// fmt.Printf("Leg: balancerWeightedPool, i: %d, reserveFrom: %f, reserveTo: %f, weightFrom: %f, weightTo: %f, feeNumerator: %f, amountIn: %f, amountOut: %f\n", i, reserveFrom, reserveTo, weightFrom, weightTo, poolInfo.Fee, amountIn, amountOut)
 			}
 		} else if leg.Type == BalancerStablePool {
 			amountOut = getAmountOutBalancerStable(
 				amountIn, poolInfo.Fee, poolInfo.AmplificationParam, poolInfo.Reserves, leg.From, leg.To, poolInfo.ScaleFactors[leg.From], poolInfo.ScaleFactors[leg.To])
 			if debug {
-				fmt.Printf("Leg: balancerStablePool, i: %d, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amplificationParameter: %f, amountIn: %f, amountOut: %f\n", i, reserveFrom, reserveTo, poolInfo.Fee, poolInfo.AmplificationParam, amountIn, amountOut)
+				fmt.Printf("Leg: balancerStablePool, i: %d, fromAddr: %s, toAddr: %s, amountIn: %f, amountOut: %f\n", i, leg.From, leg.To, amountIn, amountOut)
+				// fmt.Printf("Leg: balancerStablePool, i: %d, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amplificationParameter: %f, amountIn: %f, amountOut: %f\n", i, reserveFrom, reserveTo, poolInfo.Fee, poolInfo.AmplificationParam, amountIn, amountOut)
 				for addr, bal := range poolInfo.Reserves {
 					log.Info("Debug balancerStable reserves:", "addr", addr, "bal", bal)
 				}
 				log.Info("Amp", "amp", poolInfo.AmplificationParam)
+			}
+		} else if leg.Type == CurveBasePlainPool || leg.Type == CurveFactoryPlainPool {
+			amountOut = getAmountOutCurve(amountIn, poolInfo.Fee, poolInfo.AmplificationParam, poolInfo.Reserves, leg.From, leg.To, poolInfo.ScaleFactors[leg.From], poolInfo.ScaleFactors[leg.To])
+			if debug {
+				fmt.Printf("Leg: curvePool, i: %d, addr: %s, reserveFrom: %f, reserveTo: %f, feeNumerator: %f, amplificationParameter: %f, amountIn: %f, amountOut: %f\n", i, leg.PoolAddr, reserveFrom, reserveTo, poolInfo.Fee, poolInfo.AmplificationParam, amountIn, amountOut)
+				fmt.Printf("ReserveFrom: %f, reserveTo: %f, scaleIn: %f, scaleOut: %f\n", poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To], poolInfo.ScaleFactors[leg.From], poolInfo.ScaleFactors[leg.To])
+				fmt.Printf("FromAddr: %s, ToAddr: %s\n", leg.From, leg.To)
+				// for addr, bal := range poolInfo.Reserves {
+				// 	log.Info("Debug balancerStable reserves:", "addr", addr, "bal", bal)
+				// }
+				// log.Info("Amp", "amp", poolInfo.AmplificationParam)
 			}
 		}
 		amountIn = amountOut
@@ -358,7 +376,7 @@ func getTokenBalanceGivenInvAndBalances(amp, inv float64, balances map[common.Ad
 }
 
 func getTokenBalanceGivenInvAndBalancesCurve(amp, inv float64, balances map[common.Address]float64, balanceIn float64, tokenIn, tokenOut common.Address) float64 {
-	fmt.Printf("balanceIn: %v\n", balanceIn)
+	// fmt.Printf("balanceIn: %v\n", balanceIn)
 	ampPrecision := 1e3
 	numToks := float64(len(balances))
 	ampTimesTotal := amp * numToks
@@ -569,10 +587,10 @@ func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFract
 	updated := false
 	for a, r := range p.Reserves {
 		var rf float64
-		if poolInfo.Type == BalancerWeightedPool || poolInfo.Type == BalancerStablePool {
-			rf = upScale(BigIntToFloat(r), poolInfo.ScaleFactors[a])
-		} else {
+		if poolInfo.Type == UniswapV2Pair || poolInfo.Type == SolidlyVolatilePool || poolInfo.Type == SolidlyStablePool {
 			rf = BigIntToFloat(r)
+		} else {
+			rf = upScale(BigIntToFloat(r), poolInfo.ScaleFactors[a])
 		}
 		reserves[a] = rf
 		prevReserve := poolInfo.Reserves[a]
@@ -692,6 +710,9 @@ func (s *BalancerLinearStrategy) makeUpdates(updates []PoolUpdate) (poolsInfoOve
 		if poolInfo == nil {
 			continue
 		}
+		// if poolInfo.Type == CurveBasePlainPool || poolInfo.Type == CurveFactoryPlainPool {
+		// 	log.Warn("Updated curve pool in processPotentialtx", "address", u.Addr, "info", poolInfo)
+		// }
 		poolsInfoOverride[u.Addr] = poolInfo
 		for _, token0 := range poolInfo.Tokens {
 			for _, token1 := range poolInfo.Tokens {
@@ -763,6 +784,7 @@ func (s *BalancerLinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverr
 			route := s.routeCache.Routes[routeIdx]
 			amountIn := convertFloat(wftm, route[0].From, ScoreTiers[i], s.aggregatePools)
 			amountOut := s.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
+			// log.Info("getProfitableRoutes1", "amountIn", amountIn, "amountOut", amountOut)
 			if amountOut < amountIn {
 				break
 			}
@@ -775,6 +797,7 @@ func (s *BalancerLinearStrategy) getProfitableRoutes(key PoolKey, poolsInfoOverr
 				for in := ScoreTiers[i] * 8; in < ScoreTiers[i]*1e9; in *= 8 {
 					amountIn := convertFloat(wftm, route[0].From, math.Abs(in+rand.NormFloat64()*in/4), s.aggregatePools)
 					amountOut := s.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
+					// log.Info("getProfitableRoutes2", "amountIn", amountIn, "amountOut", amountOut)
 					if amountOut-amountIn > bestCand.Fitness {
 						bestCand = Candidate{
 							DiscreteGene:   routeIdx,
@@ -838,8 +861,8 @@ func (s *BalancerLinearStrategy) getMostProfitablePath(pop Population, poolsInfo
 	winner := pop[0]
 	route := s.routeCache.Routes[winner.DiscreteGene]
 	// gas := estimateFishGasFloat(5, len(route), gasPrice)
-	gas := estimateFishBalancerGas(route) * BigIntToFloat(gasPrice)
 	// bestAmountOut := s.getRouteAmountOutBalancer(route, winner.ContinuousGene, poolsInfoOverride, false)
+	gas := estimateFishBalancerGas(route) * BigIntToFloat(gasPrice)
 	// log.Info("Best route", "routeIdx", winner.DiscreteGene, "bestAmountIn", winner.ContinuousGene/1e18, "bestAmountOut", bestAmountOut/1e18, "bestGas", gas)
 	netProfit := winner.Fitness - gas
 	if netProfit < 0 {
@@ -853,14 +876,20 @@ func (s *BalancerLinearStrategy) getMostProfitablePath(pop Population, poolsInfo
 func estimateFishBalancerGas(route []*Leg) float64 {
 	numUniswapSwaps := 0
 	numBalancerSwaps := 0
+	numCurveSwaps := 0
 	for _, leg := range route {
 		if leg.Type == UniswapV2Pair || leg.Type == SolidlyVolatilePool {
 			numUniswapSwaps++
+		} else if leg.Type == CurveBasePlainPool || leg.Type == CurveFactoryPlainPool {
+			numCurveSwaps++
 		} else {
 			numBalancerSwaps++
 		}
 	}
-	return float64(GAS_INITIAL + GAS_TRANSFER + numUniswapSwaps*GAS_SWAP + numBalancerSwaps*(GAS_ESTIMATE_BALANCER+GAS_SWAP_BALANCER+GAS_TRANSFER))
+
+	gasBalancer := numBalancerSwaps * (GAS_ESTIMATE_BALANCER + GAS_SWAP_BALANCER + GAS_TRANSFER)
+	gasCurve := numCurveSwaps * (GAS_ESTIMATE_CURVE + GAS_SWAP_CURVE + GAS_TRANSFER)
+	return float64(GAS_INITIAL + GAS_TRANSFER + numUniswapSwaps*GAS_SWAP + gasBalancer + gasCurve)
 }
 
 func (s *BalancerLinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netProfit float64, gasPrice *big.Int, poolsInfoOverride map[common.Address]*PoolInfoFloat) *Plan {
@@ -873,7 +902,7 @@ func (s *BalancerLinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netP
 		NetProfit: FloatToBigInt(netProfit),
 		MinProfit: FloatToBigInt(minProfit),
 		AmountIn:  FloatToBigInt(startAmountIn),
-		Path:      make([]fish7_lite.Breadcrumb, len(route)),
+		Path:      make([]fish8_lite.Breadcrumb, len(route)),
 		RouteIdx:  routeIdx,
 		Reserves:  make([]ReserveInfo, 0, len(route)*2),
 	}
@@ -891,7 +920,7 @@ func (s *BalancerLinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netP
 			Type:  leg.Type,
 		}
 		if leg.Type == UniswapV2Pair || leg.Type == SolidlyVolatilePool {
-			plan.Path[i] = fish7_lite.Breadcrumb{
+			plan.Path[i] = fish8_lite.Breadcrumb{
 				TokenFrom:    leg.From,
 				TokenTo:      leg.To,
 				FeeNumerator: poolInfo.FeeNumeratorBI,
@@ -905,7 +934,7 @@ func (s *BalancerLinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netP
 			toReserveInfo.Original = FloatToBigInt(poolInfo.Reserves[leg.To])
 			toReserveInfo.Predicted = FloatToBigInt(predictedPoolInfo.Reserves[leg.To])
 		} else {
-			plan.Path[i] = fish7_lite.Breadcrumb{
+			plan.Path[i] = fish8_lite.Breadcrumb{
 				TokenFrom: leg.From,
 				TokenTo:   leg.To,
 				PoolType:  uint8(leg.Type),

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/hansel_lite"
 	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
@@ -37,7 +37,9 @@ const (
 	GAS_TRANSFER          = 27000
 	GAS_SWAP              = 150000
 	GAS_SWAP_BALANCER     = 150000
-	GAS_ESTIMATE_BALANCER = 45000 + 120000
+	GAS_SWAP_CURVE        = 150000
+	GAS_ESTIMATE_BALANCER = 45000 + 120000   // 165000
+	GAS_ESTIMATE_CURVE    = 15*25000 + 40000 // 415000
 	// GAS_INITIAL  = 0
 	// GAS_TRANSFER = 0
 	// GAS_SWAP     = 0
@@ -238,7 +240,7 @@ type Plan struct {
 	GasCost   *big.Int
 	NetProfit *big.Int
 	MinProfit *big.Int
-	Path      []fish7_lite.Breadcrumb
+	Path      []fish8_lite.Breadcrumb
 	RouteIdx  uint
 	Reserves  []ReserveInfo
 }

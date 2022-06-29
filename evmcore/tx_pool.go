@@ -432,9 +432,10 @@ func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan *types.Tra
 }
 
 func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
+	log.Info("Adjusting methods whitelist")
 	for _, m := range white {
 		if _, ok := pool.specialMethods[m]; !ok {
-			log.Info("Adding method to whitelist", "method", m)
+			// log.Info("Adding method to whitelist", "method", m)
 			pool.specialMethodsMu.Lock()
 			pool.specialMethods[m] = struct{}{}
 			pool.specialMethodsMu.Unlock()
@@ -442,7 +443,7 @@ func (pool *TxPool) UpdateMethods(white, black []dexter.Method) {
 	}
 	for _, m := range black {
 		if _, ok := pool.specialMethods[m]; ok {
-			log.Info("Removing method from whitelist", "method", m)
+			// log.Info("Removing method from whitelist", "method", m)
 			pool.specialMethodsMu.Lock()
 			delete(pool.specialMethods, m)
 			pool.specialMethodsMu.Unlock()

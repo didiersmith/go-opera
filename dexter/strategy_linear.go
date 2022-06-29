@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
 	"github.com/Fantom-foundation/go-opera/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -545,13 +545,13 @@ func (s *LinearStrategy) makePlan(routeIdx uint, gasCost, amountIn, netProfit fl
 		NetProfit: FloatToBigInt(netProfit),
 		MinProfit: FloatToBigInt(minProfit),
 		AmountIn:  FloatToBigInt(startAmountIn),
-		Path:      make([]fish7_lite.Breadcrumb, len(route)),
+		Path:      make([]fish8_lite.Breadcrumb, len(route)),
 	}
 	for i, leg := range route {
 		s.mu.RLock()
 		poolInfo := s.poolsInfo[leg.PoolAddr] // No need to use override as we don't look up reserves
 		s.mu.RUnlock()
-		plan.Path[i] = fish7_lite.Breadcrumb{
+		plan.Path[i] = fish8_lite.Breadcrumb{
 			TokenFrom:    leg.From,
 			TokenTo:      leg.To,
 			FeeNumerator: poolInfo.FeeNumeratorBI,

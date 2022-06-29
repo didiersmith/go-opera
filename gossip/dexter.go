@@ -19,8 +19,7 @@ import (
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_weighted_pool"
 	"github.com/Fantom-foundation/go-opera/contracts/curve_factory"
 	"github.com/Fantom-foundation/go-opera/contracts/curve_registry"
-	"github.com/Fantom-foundation/go-opera/contracts/fish5_lite"
-	"github.com/Fantom-foundation/go-opera/contracts/fish7_lite"
+	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/hansel_lite"
 	"github.com/Fantom-foundation/go-opera/contracts/ierc20"
 	"github.com/Fantom-foundation/go-opera/contracts/uniswap_pair_lite"
@@ -54,7 +53,9 @@ const (
 )
 
 var (
-	fishAddr         = common.HexToAddress("0x58b9fC2F82f07E67296f0d30124e4378616e8295")
+	// fishAddr         = common.HexToAddress("0x58b9fC2F82f07E67296f0d30124e4378616e8295")
+	// fishAddr = common.HexToAddress("0xa50B5c30537E000482A041cC2C5C62331739A3aC")
+	fishAddr         = common.HexToAddress("0xD4e83785632Ecb6c7b2ad8267C40d08CF1453391")
 	hanselAddr       = common.HexToAddress("0x0a81c8e5c85D8bACFe9b038c6F7fC2C5186C47B3")
 	hanselSearchAddr = common.HexToAddress("0xDFc41cC7D14F39e15DEc0CF959a9A0DA8F9C3921")
 
@@ -68,6 +69,21 @@ var (
 	swapUniswapEventTopic        = common.FromHex("0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822")
 	swapBalancerEventTopic       = common.FromHex("0x2170c741c41531aec20e7c107c24eecfdd15e69c9bb0a8dd37b1840b9e0b207b")
 	poolBalanceChangedEventTopic = common.FromHex("0xe5ce249087ce04f05a957192435400fd97868dba0e6a4b4c049abf8af80dae78")
+	curveEventTopic              = map[[32]byte]struct{}{
+		// TokenExchange event
+		[32]byte{0x8b, 0x3e, 0x96, 0xf2, 0xb8, 0x89, 0xfa, 0x77, 0x1c, 0x53, 0xc9, 0x81, 0xb4, 0x0d, 0xaf, 0x00, 0x5f, 0x63, 0xf6, 0x37, 0xf1, 0x86, 0x9f, 0x70, 0x70, 0x52, 0xd1, 0x5a, 0x3d, 0xd9, 0x71, 0x40}: struct{}{},
+		// Addliquidity events
+		[32]byte{0x26, 0xf5, 0x5a, 0x85, 0x08, 0x1d, 0x24, 0x97, 0x4e, 0x85, 0xc6, 0xc0, 0x00, 0x45, 0xd0, 0xf0, 0x45, 0x39, 0x91, 0xe9, 0x58, 0x73, 0xf5, 0x2b, 0xff, 0x0d, 0x21, 0xaf, 0x40, 0x79, 0xa7, 0x68}: struct{}{},
+		[32]byte{0x42, 0x3f, 0x64, 0x95, 0xa0, 0x8f, 0xc6, 0x52, 0x42, 0x5c, 0xf4, 0xed, 0x0d, 0x1f, 0x9e, 0x37, 0xe5, 0x71, 0xd9, 0xb9, 0x52, 0x9b, 0x1c, 0x1c, 0x23, 0xcc, 0xe7, 0x80, 0xb2, 0xe7, 0xdf, 0x0d}: struct{}{},
+		[32]byte{0x3f, 0x19, 0x15, 0x77, 0x5e, 0x0c, 0x9a, 0x38, 0xa5, 0x7a, 0x7b, 0xb7, 0xf1, 0xf9, 0x00, 0x5f, 0x48, 0x6f, 0xb9, 0x04, 0xe1, 0xf8, 0x4a, 0xa2, 0x15, 0x36, 0x4d, 0x56, 0x73, 0x19, 0xa5, 0x8d}: struct{}{},
+		// RemoveLiquidity events
+		[32]byte{0x7c, 0x36, 0x38, 0x54, 0xcc, 0xf7, 0x96, 0x23, 0x41, 0x1f, 0x89, 0x95, 0xb3, 0x62, 0xbc, 0xe5, 0xed, 0xdf, 0xf1, 0x8c, 0x92, 0x7e, 0xdc, 0x6f, 0x5d, 0xbb, 0xb5, 0xe0, 0x58, 0x19, 0xa8, 0x2c}: struct{}{},
+		[32]byte{0xa4, 0x9d, 0x4c, 0xf0, 0x26, 0x56, 0xae, 0xbf, 0x8c, 0x77, 0x1f, 0x5a, 0x85, 0x85, 0x63, 0x8a, 0x2a, 0x15, 0xee, 0x6c, 0x97, 0xcf, 0x72, 0x05, 0xd4, 0x20, 0x8e, 0xd7, 0xc1, 0xdf, 0x25, 0x2d}: struct{}{},
+		[32]byte{0x98, 0x78, 0xca, 0x37, 0x5e, 0x10, 0x6f, 0x2a, 0x43, 0xc3, 0xb5, 0x99, 0xfc, 0x62, 0x45, 0x68, 0x13, 0x1c, 0x4c, 0x9a, 0x4b, 0xa6, 0x6a, 0x14, 0x56, 0x37, 0x15, 0x76, 0x3b, 0xe9, 0xd5, 0x9d}: struct{}{},
+		// RemoveLiquidityOne events
+		[32]byte{0x5a, 0xd0, 0x56, 0xf2, 0xe2, 0x8a, 0x8c, 0xec, 0x23, 0x20, 0x15, 0x40, 0x6b, 0x84, 0x36, 0x68, 0xc1, 0xe3, 0x6c, 0xda, 0x59, 0x81, 0x27, 0xec, 0x3b, 0x8c, 0x59, 0xb8, 0xc7, 0x27, 0x73, 0xa0}: struct{}{},
+		[32]byte{}: struct{}{},
+	}
 	poolGetReservesAbi           = uniswap_pair_lite.GetReserves()
 	poolToken0Abi                = uniswap_pair_lite.Token0()
 	poolToken1Abi                = uniswap_pair_lite.Token1()
@@ -296,14 +312,19 @@ func NewDexter(svc *Service) *Dexter {
 	d.validators, d.epoch = d.svc.store.GetEpochValidators()
 	if d.nodeType == GENERAL {
 		d.strategies = []dexter.Strategy{
-			dexter.NewLinearStrategy("Linear 2-3", 0, d.railgunChan, dexter.LinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_routes_len2-3.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-3.json",
-			}),
+			// dexter.NewLinearStrategy("Linear 2-3", 0, d.railgunChan, dexter.LinearStrategyConfig{
+			// 	RoutesFileName:          root + "route_caches/solidly_routes_len2-3.json",
+			// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-3.json",
+			// }),
 
-			dexter.NewBalancerLinearStrategy("Balancer 2-3 combined", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
+			// dexter.NewBalancerLinearStrategy("Balancer 2-3 combined", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			// 	RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
+			// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
+			// }),
+
+			dexter.NewBalancerLinearStrategy("Curve 2-4", 0, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/curve_plain_routes_len2-4.json",
+				PoolToRouteIdxsFileName: root + "route_caches/curve_plain_poolToRouteIdxs_len2-4.json",
 			}),
 		}
 	} else if d.nodeType == PHILOSOPHER {
@@ -318,7 +339,7 @@ func NewDexter(svc *Service) *Dexter {
 				PoolToRouteIdxsFileName: root + "route_caches/balancer_stable_no_wftm_routes_len2-3.json",
 			}),
 
-			dexter.NewBalancerLinearStrategy("Balancer Stable", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 			}),
@@ -344,7 +365,7 @@ func NewDexter(svc *Service) *Dexter {
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_no_wftm_routes_len2-4.json",
 			}),
 
-			dexter.NewBalancerLinearStrategy("Balancer Stable", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 			}),
@@ -408,6 +429,7 @@ func NewDexter(svc *Service) *Dexter {
 			for poolAddr, t := range pairs {
 				d.interestedPairs[poolAddr] = t
 			}
+			// log.Info("Got interested pools", "i", i, "len", len(pools))
 			for poolAddr, t := range pools {
 				d.interestedPools[poolAddr] = t
 			}
@@ -440,66 +462,73 @@ func NewDexter(svc *Service) *Dexter {
 			}
 		}
 
-	for poolId, t := range d.interestedPools {
-		var poolAddr common.Address
-		copy(poolAddr[:], poolId[:20])
-		_, ok := d.poolsInfo[poolAddr]
-		if ok {
-			log.Error("Duplicate balancer pool addr", "addr", poolAddr, "id", poolId)
-			continue
-		}
-		fee := d.getSwapFeePercentage(&poolAddr, t)
-		poolInfo := dexter.PoolInfo{
-			Fee:          fee,
-			Reserves:     make(map[common.Address]*big.Int),
-			Weights:      make(map[common.Address]*big.Int),
-			ScaleFactors: make(map[common.Address]*big.Int),
-			LastUpdate:   time.Now(),
-			Type:         t,
-		}
-		if t == dexter.BalancerWeightedPool || t == dexter.BalancerStablePool {
-			d.poolsInfo[poolAddr] = &poolInfo
-			poolTokens := d.getPoolTokens(poolId)
-			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
-			poolInfo.Tokens = poolTokens.Tokens
-			for _, tokAddr := range poolInfo.Tokens {
-				decimals := d.decimals(&tokAddr)
-				decimalsDiff := int64(18 - decimals)
-				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
-				poolInfo.ScaleFactors[tokAddr] = scaleFactor
+		for poolId, t := range d.interestedPools {
+			var poolAddr common.Address
+			copy(poolAddr[:], poolId[:20])
+			// if bytes.Compare(poolAddr[:], common.HexToAddress("0xA58F16498c288c357e28EE899873fF2b55D7C437").Bytes()) == 0 {
+			// 	log.Info("Found pool 0xA58")
+			// } else {
+			// 	log.Info("Found pool", "id", common.Bytes2Hex(poolId[:]), "addr", poolAddr)
+			// }
+			_, ok := d.poolsInfo[poolAddr]
+			if ok {
+				log.Error("Duplicate balancer pool addr", "addr", poolAddr, "id", poolId)
+				continue
 			}
-			if t == dexter.BalancerWeightedPool {
-				weights := d.getNormalizedWeights(&poolAddr)
-				for i, bal := range poolTokens.Balances {
-					poolInfo.Reserves[poolTokens.Tokens[i]] = bal
-					poolInfo.Weights[poolTokens.Tokens[i]] = weights[i]
+			fee := d.getSwapFeePercentage(&poolAddr, t)
+			poolInfo := dexter.PoolInfo{
+				Fee:          fee,
+				Reserves:     make(map[common.Address]*big.Int),
+				Weights:      make(map[common.Address]*big.Int),
+				ScaleFactors: make(map[common.Address]*big.Int),
+				LastUpdate:   time.Now(),
+				Type:         t,
+			}
+			if t == dexter.BalancerWeightedPool || t == dexter.BalancerStablePool {
+				d.poolsInfo[poolAddr] = &poolInfo
+				poolTokens := d.getPoolTokens(poolId)
+				// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
+				poolInfo.Tokens = poolTokens.Tokens
+				for _, tokAddr := range poolInfo.Tokens {
+					decimals := d.decimals(&tokAddr)
+					decimalsDiff := int64(18 - decimals)
+					scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+					poolInfo.ScaleFactors[tokAddr] = scaleFactor
 				}
-			} else if t == dexter.BalancerStablePool {
-				amp := d.getAmplificationParameter(poolAddr, t)
-				poolInfo.AmplificationParam = amp
-				for i, bal := range poolTokens.Balances {
-					poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+				if t == dexter.BalancerWeightedPool {
+					weights := d.getNormalizedWeights(&poolAddr)
+					for i, bal := range poolTokens.Balances {
+						poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+						poolInfo.Weights[poolTokens.Tokens[i]] = weights[i]
+					}
+				} else if t == dexter.BalancerStablePool {
+					amp := d.getAmplificationParameter(poolAddr, t)
+					poolInfo.AmplificationParam = amp
+					for i, bal := range poolTokens.Balances {
+						poolInfo.Reserves[poolTokens.Tokens[i]] = bal
+					}
+					// log.Info("Balancer stable pool info", "id", poolId, "info", poolInfo)
 				}
+				// log.Info("Balancer pool info", "id", poolId, "info", poolInfo)
+			} else if t == dexter.CurveBasePlainPool || t == dexter.CurveFactoryPlainPool ||
+				t == dexter.CurveFactoryMetaPool {
+				d.poolsInfo[poolAddr] = &poolInfo
+				poolInfo.Tokens = d.getTokensCurve(poolAddr, t)
+				// log.Info("Curve pool tokens", "addr", poolAddr, "tokens", poolInfo.Tokens, "fee", poolInfo.Fee)
+				for _, tokAddr := range poolInfo.Tokens {
+					decimals := d.decimals(&tokAddr)
+					decimalsDiff := int64(18 - decimals)
+					scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+					poolInfo.ScaleFactors[tokAddr] = scaleFactor
+				}
+				poolInfo.AmplificationParam = d.getAmplificationParameter(poolAddr, t)
+				balances := d.getBalancesCurve(poolAddr, t)
+				// log.Info("Curve pool info", "addr", poolAddr, "info", poolInfo)
+				for i, bal := range balances {
+					poolInfo.Reserves[poolInfo.Tokens[i]] = bal
+				}
+				// log.Info("Initialised curve pool", "addr", poolAddr, "info", poolInfo)
 			}
-			// log.Info("PoolInfo", "id", poolId, "info", poolInfo)
-		} else if t == dexter.CurveBasePlainPool || t == dexter.CurveFactoryPlainPool ||
-			t == dexter.CurveFactoryMetaPool {
-			d.poolsInfo[poolAddr] = &poolInfo
-			// log.Info("Balancer pool tokens", "id", poolId, "tokens", poolTokens.Tokens, "balances", poolTokens.Balances)
-			poolInfo.Tokens = d.getTokensCurve(poolAddr, t)
-			for _, tokAddr := range poolInfo.Tokens {
-				decimals := d.decimals(&tokAddr)
-				decimalsDiff := int64(18 - decimals)
-				scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
-				poolInfo.ScaleFactors[tokAddr] = scaleFactor
-			}
-
-			poolInfo.AmplificationParam = d.getAmplificationParameter(poolAddr, t)
-			balances := d.getBalancesCurve(poolAddr, t)
-			for i, bal := range balances {
-				poolInfo.Reserves[poolInfo.Tokens[i]] = bal
-			}
-			log.Info("Initialised curve pool", "addr", poolAddr, "info", poolInfo)
 		}
 		log.Info("Min gas price", "minGasPrice", d.svc.store.GetRules().Economy.MinGasPrice)
 
@@ -1178,6 +1207,19 @@ func (d *Dexter) processPendingLogs(l *types.Log, statedb *state.StateDB) *dexte
 			u.Reserves[tokAddr] = pool.Balances[i]
 		}
 		return u
+	} else if poolInfo, ok := d.poolsInfo[l.Address]; ok && (poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool) {
+		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs.LastBlock.Idx)
+		tokens := d.getTokensCurveFromEvm(l.Address, poolInfo.Type, evm)
+		balances := d.getBalancesCurveFromEvm(l.Address, poolInfo.Type, evm)
+		u := &dexter.PoolUpdate{
+			Addr:     l.Address,
+			Reserves: make(map[common.Address]*big.Int),
+		}
+		for i, tokAddr := range tokens {
+			u.Reserves[tokAddr] = balances[i]
+		}
+		// log.Info("Processed pending log of curve pool", "addr", l.Address, "reserves", u.Reserves)
+		return u
 	}
 	return nil
 }
@@ -1212,6 +1254,7 @@ func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
 	var gasUsed uint64
 	var ptxUpdates []dexter.PoolUpdate
 	var updatedPools []dexter.BalPoolId
+	updatedCurvePools := make(map[common.Address]dexter.PoolType)
 	var crumbs []hansel_lite.Breadcrumb
 	d.evmState.mu.Lock() // LOCK MUTEX
 	txWTL.Log.RecordTime(dexter.EvmStateCopyStarted)
@@ -1241,6 +1284,9 @@ func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
 			copy(poolId[:], l.Topics[1].Bytes())
 			updatedPools = append(updatedPools, poolId)
 			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
+		} else if poolInfo, ok := d.poolsInfo[l.Address]; ok && (poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool) {
+			updatedCurvePools[l.Address] = poolInfo.Type
+			// log.Warn("Curve pool event", "topics", l.Topics, "l", l.Data)
 			// } else if poolAddr, amountIn0, _, _, _ := getAmountsFromSwapLog(l); poolAddr != nil { // Hansel
 			// 	if poolInfo, ok := d.poolsInfo[*poolAddr]; ok {
 			// 		if poolInfo.Type != dexter.UniswapV2Pair && poolInfo.Type != dexter.SolidlyVolatilePool {
@@ -1273,6 +1319,19 @@ func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
 		}
 		for i, tokAddr := range pool.Tokens {
 			u.Reserves[tokAddr] = pool.Balances[i]
+		}
+		ptxUpdates = append(ptxUpdates, u)
+	}
+	for poolAddr, t := range updatedCurvePools {
+		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs.LastBlock.Idx)
+		tokens := d.getTokensCurveFromEvm(poolAddr, t, evm)
+		balances := d.getBalancesCurveFromEvm(poolAddr, t, evm)
+		u := dexter.PoolUpdate{
+			Addr:     poolAddr,
+			Reserves: make(map[common.Address]*big.Int),
+		}
+		for i, tokAddr := range tokens {
+			u.Reserves[tokAddr] = balances[i]
 		}
 		ptxUpdates = append(ptxUpdates, u)
 	}
@@ -1355,6 +1414,8 @@ func getAmountsFromSwapLog(l *types.Log) (*common.Address, *big.Int, *big.Int, *
 
 func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	p.Log.RecordTime(dexter.PrepAndFirePlanStarted)
+	// log.Info("Ready to fire gun, returning")
+	// return
 	bravado := d.strategyBravado[p.StrategyID]
 	probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
 	failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
@@ -1405,10 +1466,13 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	var callData []byte
 	var toAddr *common.Address
 	if p.Type == dexter.SwapSinglePath {
-		callData = fish7_lite.SwapLinear(p.Target.Hash(), p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr)
-		// callData = fish5_lite.SwapLinear(p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr)
-		toAddr = &fishAddr
 		// fishCall = fish4_lite.SwapLinear(big.NewInt(0), p.Response.MinProfit, p.Response.Path, fishAddr)
+		// callData = fish5_lite.SwapLinear(p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr)
+		// callData = fish7_lite.SwapLinear(p.Target.Hash(), p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr)
+		callData = fish8_lite.SwapLinear(
+			p.Target.Hash(), p.Response.AmountIn, p.Response.MinProfit, p.Response.Path, fishAddr,
+			big.NewInt(time.Now().Unix()+60))
+		toAddr = &fishAddr
 	} else if p.Type == dexter.HanselSwapLinear {
 		callData = hansel_lite.SwapLinear(p.Response.AmountIn, p.Response.MinProfit, p.HanselResponse.Path, hanselAddr)
 		toAddr = &hanselAddr
@@ -1416,7 +1480,7 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 		log.Error("Unsupported call type", "type", p.Type)
 		return
 	}
-	gas := uint64(dexter.BigIntToFloat(p.Response.GasCost) / dexter.BigIntToFloat(p.Response.GasPrice) * 1.3)
+	gas := uint64(dexter.BigIntToFloat(p.Response.GasCost) / dexter.BigIntToFloat(p.Response.GasPrice) * 1.6)
 	var responseTx *types.Transaction
 	if p.Target.Type() == types.LegacyTxType {
 		responseTx = types.NewTransaction(nonce, *toAddr, common.Big0, gas, p.Response.GasPrice, callData)
@@ -1629,7 +1693,18 @@ func (d *Dexter) getReserve(poolType dexter.PoolType, poolId dexter.BalPoolId, t
 		}
 		return reserve1
 	} else {
-		pool := d.getPoolTokens(poolId)
+		var pool struct {
+			Tokens          []common.Address
+			Balances        []*big.Int
+			LastChangeBlock *big.Int
+		}
+		if poolType == dexter.BalancerWeightedPool || poolType == dexter.BalancerStablePool {
+			pool = d.getPoolTokens(poolId)
+		} else {
+			pool.Tokens = d.getTokensCurve(common.BytesToAddress(poolId[:20]), poolType)
+			pool.Balances = d.getBalancesCurve(common.BytesToAddress(poolId[:20]), poolType)
+			log.Info("Gotten poolInfo for curve pool", "tokens", pool.Tokens, "balances", pool.Balances)
+		}
 		for i, candTok := range pool.Tokens {
 			if bytes.Compare(candTok.Bytes(), token.Bytes()) == 0 {
 				return pool.Balances[i]
@@ -1712,9 +1787,9 @@ func (d *Dexter) getSwapFeePercentage(addr *common.Address, t dexter.PoolType) *
 	if t == dexter.BalancerWeightedPool || t == dexter.BalancerStablePool {
 		fee = new(big.Int).SetBytes(result.ReturnData[:32])
 	} else if t == dexter.CurveBasePlainPool {
-		fee = curve_registry.UnpackGetFee(result.ReturnData)[0]
+		fee = curve_registry.UnpackGetFee(result.ReturnData)
 	} else if t == dexter.CurveFactoryPlainPool {
-		fee = curve_factory.UnpackGetFee(result.ReturnData)[0]
+		fee = curve_factory.UnpackGetFee(result.ReturnData)
 	}
 	return fee
 }
@@ -1736,6 +1811,9 @@ func (d *Dexter) getAmplificationParameter(addr common.Address, t dexter.PoolTyp
 		return nil
 	}
 	amp := new(big.Int).SetBytes(result.ReturnData[:32])
+	if t == dexter.CurveBasePlainPool || t == dexter.CurveFactoryPlainPool || t == dexter.CurveFactoryMetaPool {
+		amp = amp.Mul(amp, big.NewInt(1e3))
+	}
 	return amp
 }
 
@@ -1753,6 +1831,10 @@ func (d *Dexter) getNormalizedWeights(addr *common.Address) []*big.Int {
 
 func (d *Dexter) getTokensCurve(addr common.Address, t dexter.PoolType) []common.Address {
 	evm := d.getReadOnlyEvm()
+	return d.getTokensCurveFromEvm(addr, t, evm)
+}
+
+func (d *Dexter) getTokensCurveFromEvm(addr common.Address, t dexter.PoolType, evm *vm.EVM) []common.Address {
 	var msg types.Message
 	if t == dexter.CurveBasePlainPool {
 		msg = d.readOnlyMessage(&cRegistryAddr, curve_registry.GetCoins(addr))
@@ -1767,29 +1849,19 @@ func (d *Dexter) getTokensCurve(addr common.Address, t dexter.PoolType) []common
 	}
 	var tokens []common.Address
 	if t == dexter.CurveBasePlainPool {
-		tokens = curve_factory.UnpackGetCoins(result.ReturnData)
+		tokens = curve_registry.UnpackGetCoins(result.ReturnData)
 	} else if t == dexter.CurveFactoryPlainPool {
 		tokens = curve_factory.UnpackGetCoins(result.ReturnData)
 	}
-	filteredTokens := make([]common.Address, len(tokens))
-	for i, tok := range tokens {
-		if tok != nullAddr {
-			filteredTokens[i] = tok
+	var filteredTokens []common.Address
+	for _, tok := range tokens {
+		if tok == nullAddr {
+			// log.Info("Encountered nullAddr")
+			continue
 		}
+		filteredTokens = append(filteredTokens, tok)
 	}
 	return filteredTokens
-}
-
-func (d *Dexter) decimals(addr *common.Address) uint8 {
-	evm := d.getReadOnlyEvm()
-	msg := d.readOnlyMessage(addr, decimalsAbi)
-	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
-	result, err := evmcore.ApplyMessage(evm, msg, gp)
-	if err != nil {
-		log.Error("decimals error", "err", err)
-		return 18
-	}
-	return uint8(result.ReturnData[31])
 }
 
 func (d *Dexter) getBalancesCurve(poolAddr common.Address, t dexter.PoolType) []*big.Int {
@@ -1807,22 +1879,24 @@ func (d *Dexter) getBalancesCurveFromEvm(poolAddr common.Address, t dexter.PoolT
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
 	result, err := evmcore.ApplyMessage(evm, msg, gp)
 	if err != nil {
-		log.Error("getPoolTokens error", "err", err)
+		log.Error("getBalancesCurve error", "err", err)
 	}
-	// log.Info("getPoolTokens", "addr", bVaultAddr, "poolId", poolId, "result", result.ReturnData)
+	// log.Info("getBalancesCurve", "addr", bVaultAddr, "poolId", poolId, "result", result.ReturnData)
 	var balances []*big.Int
 	if t == dexter.CurveBasePlainPool {
 		balances = curve_factory.UnpackGetBalances(result.ReturnData)
 	} else if t == dexter.CurveFactoryPlainPool {
 		balances = curve_factory.UnpackGetBalances(result.ReturnData)
 	}
-	filteredBalances := make([]*big.Int, len(balances))
+	var filteredBalances []*big.Int
 	zero := big.NewInt(0)
-	for i, bal := range balances {
-		if bal != zero {
-			filteredBalances[i] = bal
+	for _, bal := range balances {
+		if bal.Cmp(zero) == 0 {
+			continue
 		}
+		filteredBalances = append(filteredBalances, bal)
 	}
+
 	return filteredBalances
 }
 
@@ -1848,6 +1922,18 @@ func (d *Dexter) getPoolTokensFromEvm(poolId dexter.BalPoolId, evm *vm.EVM) stru
 	}
 	// log.Info("getPoolTokens", "addr", bVaultAddr, "poolId", poolId, "result", result.ReturnData)
 	return balancer_v2_vault.UnpackGetPoolTokens(result.ReturnData)
+}
+
+func (d *Dexter) decimals(addr *common.Address) uint8 {
+	evm := d.getReadOnlyEvm()
+	msg := d.readOnlyMessage(addr, decimalsAbi)
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("decimals error", "err", err)
+		return 18
+	}
+	return uint8(result.ReturnData[31])
 }
 
 func (d *Dexter) readOnlyMessage(toAddr *common.Address, data []byte) types.Message {
