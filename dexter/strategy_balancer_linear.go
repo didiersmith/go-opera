@@ -196,7 +196,7 @@ func (s *BalancerLinearStrategy) loadJson() {
 				t = CurveFactoryPlainPool
 				s.interestedPools[poolId] = t
 			} else if leg.ExchangeType == "curveFactoryMetaPool" {
-				// log.Info("Found curve factory meta pool")
+				log.Info("Found curve factory meta pool")
 				t = CurveFactoryMetaPool
 				s.interestedPools[poolId] = t
 			} else {

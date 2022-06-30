@@ -414,8 +414,8 @@ func NewDexter(svc *Service) *Dexter {
 
 		for _, s := range d.strategies {
 			pairs, pools := s.GetInterestedPools()
-			for poolAddr, t := range pairs {
-				d.interestedPairs[poolAddr] = t
+			for pairAddr, t := range pairs {
+				d.interestedPairs[pairAddr] = t
 			}
 			// log.Info("Got interested pools", "i", i, "len", len(pools))
 			for poolAddr, t := range pools {
@@ -424,40 +424,35 @@ func NewDexter(svc *Service) *Dexter {
 		}
 
 		edgePools := make(map[dexter.EdgeKey][]common.Address)
-		for poolAddr, t := range d.interestedPairs {
-			poolInfo, ok := d.poolsInfo[poolAddr]
+		for pairAddr, t := range d.interestedPairs {
+			pairInfo, ok := d.poolsInfo[pairAddr]
 			if !ok {
-				log.Warn("Could not find PoolInfo for interested pool", "addr", poolAddr)
+				log.Warn("Could not find pairInfo for interested pair", "addr", pairAddr)
 				continue
 			}
 			if t == dexter.UniswapV2Pair || t == dexter.SolidlyVolatilePool || t == dexter.SolidlyStablePool {
-				reserve0, reserve1 := d.getReserves(&poolAddr)
-				token0, token1 := d.getUniswapPairTokens(&poolAddr)
-				d.poolsInfo[poolAddr] = &dexter.PoolInfo{
+				reserve0, reserve1 := d.getReserves(&pairAddr)
+				token0, token1 := d.getUniswapPairTokens(&pairAddr)
+				d.poolsInfo[pairAddr] = &dexter.PoolInfo{
 					Reserves:     map[common.Address]*big.Int{token0: reserve0, token1: reserve1},
 					Tokens:       []common.Address{token0, token1},
-					FeeNumerator: poolInfo.FeeNumerator,
+					FeeNumerator: pairInfo.FeeNumerator,
 					LastUpdate:   time.Now(),
 				}
 				edgeKey := dexter.MakeEdgeKey(token0, token1)
 				if pools, ok := edgePools[edgeKey]; ok {
-					edgePools[edgeKey] = append(pools, poolAddr)
+					edgePools[edgeKey] = append(pools, pairAddr)
 				} else {
-					edgePools[edgeKey] = []common.Address{poolAddr}
+					edgePools[edgeKey] = []common.Address{pairAddr}
 				}
 			} else {
-				log.Error("Interested in pair that is not uniswap pair?!", "addr", poolAddr.Hex())
+				log.Error("Interested in pair that is not uniswap pair?!", "addr", pairAddr.Hex())
 			}
 		}
 
 		for poolId, t := range d.interestedPools {
 			var poolAddr common.Address
 			copy(poolAddr[:], poolId[:20])
-			// if bytes.Compare(poolAddr[:], common.HexToAddress("0xA58F16498c288c357e28EE899873fF2b55D7C437").Bytes()) == 0 {
-			// 	log.Info("Found pool 0xA58")
-			// } else {
-			// 	log.Info("Found pool", "id", common.Bytes2Hex(poolId[:]), "addr", poolAddr)
-			// }
 			_, ok := d.poolsInfo[poolAddr]
 			if ok {
 				log.Error("Duplicate balancer pool addr", "addr", poolAddr, "id", poolId)
@@ -1402,8 +1397,8 @@ func getAmountsFromSwapLog(l *types.Log) (*common.Address, *big.Int, *big.Int, *
 
 func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	p.Log.RecordTime(dexter.PrepAndFirePlanStarted)
-	// log.Info("Ready to fire gun, returning")
-	// return
+	log.Info("Ready to fire gun, returning")
+	return
 	bravado := d.strategyBravado[p.StrategyID]
 	probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
 	failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
@@ -1762,7 +1757,7 @@ func (d *Dexter) getSwapFeePercentage(addr *common.Address, t dexter.PoolType) *
 		msg = d.readOnlyMessage(addr, getSwapFeePercentageAbi)
 	} else if t == dexter.CurveBasePlainPool {
 		msg = d.readOnlyMessage(&cRegistryAddr, curve_registry.GetFees(addr))
-	} else if t == dexter.CurveFactoryPlainPool {
+	} else if t == dexter.CurveFactoryPlainPool || t == dexter.CurveFactoryMetaPool {
 		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetFees(addr))
 	}
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
@@ -1776,7 +1771,7 @@ func (d *Dexter) getSwapFeePercentage(addr *common.Address, t dexter.PoolType) *
 		fee = new(big.Int).SetBytes(result.ReturnData[:32])
 	} else if t == dexter.CurveBasePlainPool {
 		fee = curve_registry.UnpackGetFee(result.ReturnData)
-	} else if t == dexter.CurveFactoryPlainPool {
+	} else if t == dexter.CurveFactoryPlainPool || t == dexter.CurveFactoryMetaPool {
 		fee = curve_factory.UnpackGetFee(result.ReturnData)
 	}
 	return fee
@@ -1828,11 +1823,13 @@ func (d *Dexter) getTokensCurveFromEvm(addr common.Address, t dexter.PoolType, e
 		msg = d.readOnlyMessage(&cRegistryAddr, curve_registry.GetCoins(addr))
 	} else if t == dexter.CurveFactoryPlainPool {
 		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetCoins(addr))
+	} else if t == dexter.CurveFactoryMetaPool {
+		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetUnderlyingCoins(addr))
 	}
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
 	result, err := evmcore.ApplyMessage(evm, msg, gp)
 	if err != nil {
-		log.Error("getNormalizedWeights error", "err", err)
+		log.Error("getTokensCurve error", "err", err)
 		return nil
 	}
 	var tokens []common.Address
@@ -1840,6 +1837,8 @@ func (d *Dexter) getTokensCurveFromEvm(addr common.Address, t dexter.PoolType, e
 		tokens = curve_registry.UnpackGetCoins(result.ReturnData)
 	} else if t == dexter.CurveFactoryPlainPool {
 		tokens = curve_factory.UnpackGetCoins(result.ReturnData)
+	} else if t == dexter.CurveFactoryMetaPool {
+		tokens = curve_factory.UnpackGetUnderlyingCoins(result.ReturnData)
 	}
 	var filteredTokens []common.Address
 	for _, tok := range tokens {

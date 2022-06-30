@@ -76,3 +76,20 @@ func UnpackGetCoins(data []byte) []common.Address {
 	c := out[0].([4]common.Address)
 	return c[:]
 }
+
+func GetUnderlyingCoins(poolAddr common.Address) []byte {
+	data, err := sAbi.Pack("get_underlying_coins", poolAddr)
+	if err != nil {
+		log.Error("Error packing get_coins", "err", err)
+	}
+	return data
+}
+
+func UnpackGetUnderlyingCoins(data []byte) []common.Address {
+	out, err := sAbi.Unpack("get_underlying_coins", data)
+	if err != nil {
+		log.Error("Error unpacking get_coins", "err", err)
+	}
+	c := out[0].([8]common.Address)
+	return c[:]
+}
