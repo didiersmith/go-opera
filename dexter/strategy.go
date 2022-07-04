@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
@@ -142,12 +143,17 @@ func (log TimeLog) Format() string {
 	return strings.Join(a, "\n") + "\nTotal                  " + utils.PrettyDuration(log[GunFireComplete].Sub(log[TxCreated])).String()
 }
 
+type TxFriendlyFire struct {
+	Tx       *types.Transaction
+	TargetTx *types.Transaction
+}
+
 type TxWithTimeLog struct {
 	Tx  *types.Transaction
 	Log TimeLog
 }
 
-var ScoreTiers = []float64{10000 * 1e18, 1000 * 1e18, 100 * 1e18, 10 * 1e18, 1e18}
+var ScoreTiers = []float64{10000 * 1e18, 100 * 1e18, 10 * 1e18}
 
 type PoolKey [60]byte
 type EdgeKey [40]byte
@@ -194,10 +200,18 @@ type PoolInfo struct {
 	Type               PoolType
 }
 
+type AmountOutCacheKey struct {
+	TokenIn  common.Address
+	TokenOut common.Address
+	AmountIn float64
+}
+
 type PoolInfoFloat struct {
 	Tokens             []common.Address
 	Reserves           map[common.Address]float64
 	Weights            map[common.Address]float64
+	AmountOutCache     map[AmountOutCacheKey]float64
+	AmountOutCacheMu   sync.Mutex
 	FeeNumerator       float64
 	FeeNumeratorBI     *big.Int
 	Fee                float64
@@ -267,6 +281,7 @@ type LegJson struct {
 	PoolAddr     string `json:poolAddr`
 	PoolId       string `json:poolId`
 	ExchangeType string `json:exchangeType`
+	ExchangeName string `json:exchangeName`
 }
 
 type RouteCacheJson struct {
@@ -336,11 +351,6 @@ type ReserveInfo struct {
 	Actual    *big.Int
 }
 
-type AmountOutCacheKey struct {
-	PoolId   BalPoolId
-	AmountIn float64
-}
-
 type PoolInfoJson struct {
 	Addr         string `json:addr`
 	Token0       string `json:token0`
@@ -363,6 +373,11 @@ type BalancerPoolJson struct {
 		Weight   string `json:weight`
 		Balance  string `json:balance`
 	}
+}
+
+type ScoreUpdateRequest struct {
+	refreshKeys              map[PoolKey]struct{}
+	poolsInfoCombinedUpdates map[common.Address]*PoolInfoFloat
 }
 
 func estimateFishGasFloat(numTransfers, numSwaps int, gasPrice *big.Int) float64 {

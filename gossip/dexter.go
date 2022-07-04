@@ -182,11 +182,37 @@ var (
 	startTokensIn = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 )
 
+type TargetAction int
+
+const (
+	NOT_SEEN                 TargetAction = 0
+	SKIPPED_BLOCK_OVERFIRED  TargetAction = 1
+	SKIPPED_LAG_HIGH         TargetAction = 2
+	PROCESSED                TargetAction = 3
+	UNPROFITABLE_PLAN        TargetAction = 4
+	COULD_NOT_FIND_VALIDATOR TargetAction = 5
+	GUN_ALREADY_FIRED        TargetAction = 6
+	FIRED                    TargetAction = 7
+)
+
+func (t TargetAction) String() string {
+	return [...]string{
+		"NOT_SEEN",
+		"SKIPPED_BLOCK_OVERFIRED",
+		"SKIPPED_LAG_HIGH",
+		"PROCESSED",
+		"UNPROFITABLE_PLAN",
+		"COULD_NOT_FIND_VALIDATOR",
+		"GUN_ALREADY_FIRED",
+		"FIRED",
+	}[t]
+}
+
 type Dexter struct {
 	nodeType           NodeType
 	svc                *Service
 	inTxChan           chan *dexter.TxWithTimeLog
-	inFriendlyFireChan chan *types.Transaction
+	inFriendlyFireChan chan *dexter.TxFriendlyFire
 	inLogsChan         chan []*types.Log
 	inLogsSub          notify.Subscription
 	inBlockChan        chan evmcore.ChainHeadNotify
@@ -228,6 +254,10 @@ type Dexter struct {
 	tournament               *Tournament
 	validatorMu              sync.RWMutex
 	gunMu                    sync.Mutex
+	specialMethods           map[[4]byte]struct{}
+	specialMethodsMu         sync.RWMutex
+	SeenTxs                  *lru.Cache
+	SeenTxsMu                sync.Mutex
 }
 
 type EvmState struct {
@@ -283,7 +313,7 @@ func NewDexter(svc *Service) *Dexter {
 		nodeType:           nodeType,
 		svc:                svc,
 		inTxChan:           make(chan *dexter.TxWithTimeLog, 256),
-		inFriendlyFireChan: make(chan *types.Transaction, 32),
+		inFriendlyFireChan: make(chan *dexter.TxFriendlyFire, 32),
 		inLogsChan:         make(chan []*types.Log, 4096),
 		inBlockChan:        make(chan evmcore.ChainHeadNotify, 4096),
 		inEpochChan:        make(chan idx.Epoch, 4096),
@@ -307,8 +337,10 @@ func NewDexter(svc *Service) *Dexter {
 		evmState: &EvmState{
 			pendingUpdates: make(map[common.Address]*dexter.PoolUpdate),
 		},
-		tournament: NewTournament(svc),
+		tournament:     NewTournament(svc),
+		specialMethods: make(map[[4]byte]struct{}),
 	}
+	d.SeenTxs, _ = lru.New(1024)
 	d.validators, d.epoch = d.svc.store.GetEpochValidators()
 	if d.nodeType == GENERAL {
 		d.strategies = []dexter.Strategy{
@@ -344,8 +376,8 @@ func NewDexter(svc *Service) *Dexter {
 			}),
 
 			dexter.NewBalancerLinearStrategy("Balancer 2-4 Sans", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_balancer_no_wftm_poolToRouteIdxs_len2-4.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_no_wftm_routes_len2-4.json",
+				RoutesFileName:          root + "route_caches/balancer_no_wftm_routes_len2-4.json",
+				PoolToRouteIdxsFileName: root + "route_caches/balancer_no_wftm_poolToRouteIdxs_len2-4.json",
 			}),
 
 			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
@@ -819,39 +851,65 @@ func (d *Dexter) watchFriendlyFire() {
 	seenTxs, _ := lru.New(512)
 	var rtLag time.Duration
 	for {
-		tx := <-d.inFriendlyFireChan
+		txff := <-d.inFriendlyFireChan
 		if d.lag > 4*time.Second {
 			continue
 		}
-		if _, ok := seenTxs.Get(tx.Hash()); ok {
+		if _, ok := seenTxs.Get(txff.Tx.Hash()); ok {
 			continue
 		}
-		seenTxs.Add(tx.Hash(), struct{}{})
-		data := tx.Data()
-		var txs []*types.Transaction
-		if data[0] == 0x66 && len(data) > 36 { // fish7
-			var targetTxHash common.Hash
-			copy(targetTxHash[:], data[4:36])
-			// targetTxHash := common.Hash(data[4:36])
-			targetTx := d.svc.txpool.Get(targetTxHash)
-			if targetTx != nil {
-				txs = append(txs, targetTx)
-				lag := time.Now().Sub(targetTx.Time())
-				rtLag = time.Duration(float64(lag)*mttsAlpha + float64(rtLag)*(1-mttsAlpha))
-				log.Info("Found source tx", "round trip lag", utils.PrettyDuration(lag), "avg rtlag", rtLag)
+		fishTxs := []*dexter.TxFriendlyFire{txff}
+		seenTxs.Add(txff.Tx.Hash(), struct{}{})
+	loop:
+		for {
+			select {
+			case txff = <-d.inFriendlyFireChan:
+				if _, ok := seenTxs.Get(txff.Tx.Hash()); ok {
+					continue
+				}
+				seenTxs.Add(txff.Tx.Hash(), struct{}{})
+				fishTxs = append(fishTxs, txff)
+			default:
+				break loop
 			}
 		}
-		txs = append(txs, tx)
-		from, _ := types.Sender(d.signer, tx)
-		validatorIDs := d.predictValidators(from, tx.Nonce(), d.validators, d.epoch, 1)
-		log.Info("Amplifying tx", "len", len(txs), "hash", tx.Hash().Hex(), "lag", utils.PrettyDuration(time.Now().Sub(tx.Time())))
+
+		var txs []*types.Transaction
+		includedSources := make(map[common.Hash]struct{})
+		for _, txff := range fishTxs {
+			if txff.TargetTx != nil {
+				if _, ok := includedSources[txff.TargetTx.Hash()]; !ok {
+					includedSources[txff.TargetTx.Hash()] = struct{}{}
+					txs = append(txs, txff.TargetTx)
+					lag := time.Now().Sub(txff.TargetTx.Time())
+					rtLag = time.Duration(float64(lag)*mttsAlpha + float64(rtLag)*(1-mttsAlpha))
+					d.SeenTxsMu.Lock()
+					sourceStatusI, ok := d.SeenTxs.Get(txff.TargetTx.Hash())
+					d.SeenTxsMu.Unlock()
+					sourceStatus := NOT_SEEN
+					if ok {
+						sourceStatus = sourceStatusI.(TargetAction)
+					}
+					log.Info("Found source tx", "round trip lag", utils.PrettyDuration(lag), "avg rtlag", rtLag, "status", sourceStatus)
+				}
+			}
+			txs = append(txs, txff.Tx)
+		}
+		if len(txs) == 0 {
+			continue
+		}
+		from, _ := types.Sender(d.signer, txs[0])
+		validatorIDs := d.predictValidators(from, txs[0].Nonce(), d.validators, d.epoch, 1)
+		log.Info("Amplifying tx", "len", len(txs), "init hash", txs[0].Hash().Hex(), "lag", utils.PrettyDuration(time.Now().Sub(txs[0].Time())))
 		peers := d.tournament.GetSortedPeers(validatorIDs[0])
 		go d.svc.handler.BroadcastTxsAggressive(txs, BroadcastNonTrusted, peers)
 
 		if d.nodeType != SCOUT {
-			from, _ := types.Sender(d.signer, tx)
 			d.gunMu.Lock()
-			d.gunLastFired[from] = time.Now()
+			for _, txff := range fishTxs {
+				from, _ := types.Sender(d.signer, txff.Tx)
+				d.gunLastFired[from] = time.Now()
+			}
 			d.gunMu.Unlock()
 		}
 	}
@@ -968,12 +1026,21 @@ func (d *Dexter) processIncomingTxs() {
 		}
 		seenTxs.Add(txWTL.Tx.Hash(), struct{}{})
 		if d.numFiredThisBlock > 2 {
+			d.SeenTxsMu.Lock()
+			d.SeenTxs.Add(txWTL.Tx.Hash(), SKIPPED_BLOCK_OVERFIRED)
+			d.SeenTxsMu.Unlock()
 			continue
 		}
 		if d.lag > 4*time.Second {
+			d.SeenTxsMu.Lock()
+			d.SeenTxs.Add(txWTL.Tx.Hash(), SKIPPED_LAG_HIGH)
+			d.SeenTxsMu.Unlock()
 			continue
 		}
 		txWTL.Log.RecordTime(dexter.DexterReceived)
+		d.SeenTxsMu.Lock()
+		d.SeenTxs.Add(txWTL.Tx.Hash(), PROCESSED)
+		d.SeenTxsMu.Unlock()
 		go d.processTx(txWTL)
 		// log.Info("Received interesting tx", "len", len(d.inTxChan))
 	}
@@ -1023,7 +1090,7 @@ func (d *Dexter) processIncomingBlocks() {
 						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID]*bravadoAlpha + (1 - bravadoAlpha)
 						log.Info("SUCCESS", "est profit", dexter.BigIntToFloat(f.Plan.NetProfit)/1e18, "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)), "gas", receipt.GasUsed, "estimated", gasEst)
 					} else {
-						d.diagnoseTx(tx, f)
+						// d.diagnoseTx(tx, f)
 						d.strategyBravado[f.StrategyID] = d.strategyBravado[f.StrategyID] * bravadoAlpha
 						log.Info("Fail", "est profit", dexter.BigIntToFloat(f.Plan.NetProfit)/1e18, "tx", tx.Hash().Hex(), "strategy", f.StrategyID, "new bravado", d.strategyBravado[f.StrategyID], "lag", utils.PrettyDuration(time.Now().Sub(f.Time)), "gas", receipt.GasUsed, "estimated", gasEst)
 					}
@@ -1410,6 +1477,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	probAdjustedFailCost := new(big.Int).Mul(failCost, big.NewInt(int64(1e6-(d.accuracy*bravado))))
 	if probAdjustedPayoff.Cmp(probAdjustedFailCost) == -1 {
 		log.Info("Trade unprofitable after adjusting for accuracy", "accuracy", d.accuracy, "bravado", bravado, "probAdjustedPayoff", dexter.BigIntToFloat(probAdjustedPayoff)/1e18, "lose", dexter.BigIntToFloat(probAdjustedFailCost)/1e18, "accuracy", d.accuracy, "bravado", bravado, "unadjusted win", dexter.BigIntToFloat(p.Response.NetProfit)/1e18, "unadjusted lose", dexter.BigIntToFloat(failCost)/1e18)
+		d.SeenTxsMu.Lock()
+		d.SeenTxs.Add(p.Target.Hash(), UNPROFITABLE_PLAN)
+		d.SeenTxsMu.Unlock()
 		return
 	}
 	from, _ := types.Sender(d.signer, p.Target)
@@ -1433,6 +1503,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	if gun.ValidatorIDs[0] != validatorIDs[0] {
 		log.Warn("Could not find validator", "validator", validatorIDs[0])
 		d.gunMu.Unlock() // UNLOCK MUTEX
+		d.SeenTxsMu.Lock()
+		d.SeenTxs.Add(p.Target.Hash(), COULD_NOT_FIND_VALIDATOR)
+		d.SeenTxsMu.Unlock()
 		return
 	}
 	d.gunList = d.gunList.Del(gunIdx)
@@ -1445,6 +1518,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	if lastFiredTime, ok := d.gunLastFired[account.Address]; ok && time.Now().Sub(lastFiredTime) < time.Second {
 		log.Info("Gun already fired, returning", "gun", account.Address, "lastFired", utils.PrettyDuration(time.Now().Sub(lastFiredTime)))
 		d.gunMu.Unlock() // UNLOCK MUTEX
+		d.SeenTxsMu.Lock()
+		d.SeenTxs.Add(p.Target.Hash(), GUN_ALREADY_FIRED)
+		d.SeenTxsMu.Unlock()
 		return
 	}
 	d.gunMu.Unlock() // UNLOCK MUTEX
@@ -1501,6 +1577,9 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	lag := time.Now().Sub(p.Target.Time())
 	peers := d.tournament.GetSortedPeers(validatorIDs[0])
 	// log.Info("Got sorted peers for validator", "vid", validatorIDs[0], "len", len(peers))
+	d.SeenTxsMu.Lock()
+	d.SeenTxs.Add(p.Target.Hash(), FIRED)
+	d.SeenTxsMu.Unlock()
 	log.Info("FIRING GUN pew pew",
 		"profit", dexter.BigIntToFloat(p.Response.NetProfit)/1e18,
 		"lag", utils.PrettyDuration(time.Now().Sub(p.StartTime)),
@@ -1598,6 +1677,7 @@ func (d *Dexter) watchEvents() {
 			if len(e.Txs()) > 0 && d.lag < 4*time.Second {
 				d.advanceEvmState(e)
 			}
+			d.numFiredThisBlock = 0
 			interested := false
 			interestedGas := make(map[int64]struct{})
 			predictedValidators := make(map[common.Hash][]idx.ValidatorID)
@@ -1983,5 +2063,21 @@ func (d *Dexter) updateMethods() {
 		// var black []dexter.Method
 		white, black := d.methodist.GetLists()
 		d.svc.txpool.UpdateMethods(white, black)
+		for _, m := range white {
+			if _, ok := d.specialMethods[m]; !ok {
+				// log.Info("Adding method to whitelist", "method", m)
+				d.specialMethodsMu.Lock()
+				d.specialMethods[m] = struct{}{}
+				d.specialMethodsMu.Unlock()
+			}
+		}
+		for _, m := range black {
+			if _, ok := d.specialMethods[m]; ok {
+				// log.Info("Removing method from whitelist", "method", m)
+				d.specialMethodsMu.Lock()
+				delete(d.specialMethods, m)
+				d.specialMethodsMu.Unlock()
+			}
+		}
 	}
 }

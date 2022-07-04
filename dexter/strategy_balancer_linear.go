@@ -22,23 +22,26 @@ import (
 )
 
 type BalancerLinearStrategy struct {
-	Name                string
-	ID                  int
-	RailgunChan         chan *RailgunPacket
-	inPossibleTxsChan   chan *PossibleTx
-	inStateUpdatesChan  chan StateUpdate
-	cfg                 BalancerLinearStrategyConfig
-	poolsInfo           map[common.Address]*PoolInfoFloat
-	poolsInfoPending    map[common.Address]*PoolInfoFloat
-	poolsInfoUpdateChan chan *PoolsInfoUpdateFloat
-	interestedPairs     map[common.Address]PoolType
-	interestedPools     map[BalPoolId]PoolType
-	edgePools           map[EdgeKey][]common.Address
-	aggregatePools      map[EdgeKey]*PoolInfoFloat
-	routeCache          MultiScoreRouteCache
-	subStrategies       []Strategy
-	gasPrice            int64
-	mu                  sync.RWMutex
+	Name                   string
+	ID                     int
+	RailgunChan            chan *RailgunPacket
+	inPossibleTxsChan      chan *PossibleTx
+	inStateUpdatesChan     chan StateUpdate
+	cfg                    BalancerLinearStrategyConfig
+	allPoolsInfo           map[common.Address]*PoolInfoFloat
+	poolsInfo              map[common.Address]*PoolInfoFloat
+	poolsInfoPending       map[common.Address]*PoolInfoFloat
+	poolsInfoUpdateChan    chan *PoolsInfoUpdateFloat
+	scoreUpdateRequestChan chan ScoreUpdateRequest
+	interestedAddrs        map[common.Address]struct{}
+	interestedPairs        map[common.Address]PoolType
+	interestedPools        map[BalPoolId]PoolType
+	edgePools              map[EdgeKey][]common.Address
+	aggregatePools         map[EdgeKey]*PoolInfoFloat
+	routeCache             MultiScoreRouteCache
+	subStrategies          []Strategy
+	gasPrice               int64
+	mu                     sync.RWMutex
 }
 
 type BalancerLinearStrategyConfig struct {
@@ -49,18 +52,21 @@ type BalancerLinearStrategyConfig struct {
 
 func NewBalancerLinearStrategy(name string, id int, railgun chan *RailgunPacket, cfg BalancerLinearStrategyConfig) Strategy {
 	s := &BalancerLinearStrategy{
-		Name:                name,
-		ID:                  id,
-		RailgunChan:         railgun,
-		inPossibleTxsChan:   make(chan *PossibleTx, 256),
-		inStateUpdatesChan:  make(chan StateUpdate, 256),
-		cfg:                 cfg,
-		poolsInfo:           make(map[common.Address]*PoolInfoFloat),
-		poolsInfoPending:    make(map[common.Address]*PoolInfoFloat),
-		poolsInfoUpdateChan: make(chan *PoolsInfoUpdateFloat),
-		interestedPairs:     make(map[common.Address]PoolType),
-		interestedPools:     make(map[BalPoolId]PoolType),
-		aggregatePools:      make(map[EdgeKey]*PoolInfoFloat),
+		Name:                   name,
+		ID:                     id,
+		RailgunChan:            railgun,
+		inPossibleTxsChan:      make(chan *PossibleTx, 256),
+		inStateUpdatesChan:     make(chan StateUpdate, 256),
+		cfg:                    cfg,
+		allPoolsInfo:           make(map[common.Address]*PoolInfoFloat),
+		poolsInfo:              make(map[common.Address]*PoolInfoFloat),
+		poolsInfoPending:       make(map[common.Address]*PoolInfoFloat),
+		poolsInfoUpdateChan:    make(chan *PoolsInfoUpdateFloat),
+		scoreUpdateRequestChan: make(chan ScoreUpdateRequest),
+		interestedAddrs:        make(map[common.Address]struct{}),
+		interestedPairs:        make(map[common.Address]PoolType),
+		interestedPools:        make(map[BalPoolId]PoolType),
+		aggregatePools:         make(map[EdgeKey]*PoolInfoFloat),
 	}
 	s.loadJson()
 	return s
@@ -68,6 +74,7 @@ func NewBalancerLinearStrategy(name string, id int, railgun chan *RailgunPacket,
 
 func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*PoolInfo) {
 	for k, v := range poolsInfo {
+		_, interested := s.interestedAddrs[k]
 		reserves := make(map[common.Address]float64)
 		weights := make(map[common.Address]float64)
 		scaleFactors := make(map[common.Address]float64)
@@ -90,6 +97,7 @@ func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*Pool
 			Tokens:             v.Tokens,
 			Reserves:           reserves,
 			Weights:            weights,
+			AmountOutCache:     make(map[AmountOutCacheKey]float64),
 			ScaleFactors:       scaleFactors,
 			FeeNumerator:       BigIntToFloat(v.FeeNumerator),
 			FeeNumeratorBI:     v.FeeNumerator,
@@ -99,7 +107,10 @@ func (s *BalancerLinearStrategy) SetPoolsInfo(poolsInfo map[common.Address]*Pool
 			AmplificationParam: BigIntToFloat(v.AmplificationParam),
 			Type:               v.Type,
 		}
-		s.poolsInfo[k] = poolInfo
+		if interested {
+			s.poolsInfo[k] = poolInfo
+		}
+		s.allPoolsInfo[k] = poolInfo
 	}
 }
 
@@ -135,7 +146,7 @@ func (s *BalancerLinearStrategy) AddSubStrategy(sub Strategy) {
 }
 
 func (s *BalancerLinearStrategy) Start() {
-	s.aggregatePools = makeAggregatePoolsFloat(s.edgePools, s.poolsInfo, nil, nil)
+	s.aggregatePools = makeAggregatePoolsFloat(s.edgePools, s.allPoolsInfo, nil, nil)
 	for i := 0; i < len(ScoreTiers); i++ {
 		s.routeCache.Scores[i] = s.makeScores(ScoreTiers[i])
 		for _, routeIdxs := range s.routeCache.PoolToRouteIdxs {
@@ -144,6 +155,7 @@ func (s *BalancerLinearStrategy) Start() {
 		}
 	}
 	go s.runStateUpdater()
+	go s.runScoreUpdater()
 	go s.runStrategy()
 }
 
@@ -157,8 +169,12 @@ func (s *BalancerLinearStrategy) loadJson() {
 	defer routeCacheRoutesFile.Close()
 	routeCacheRoutesBytes, _ := ioutil.ReadAll(routeCacheRoutesFile)
 	var routeCacheJson RouteCacheJson
-	json.Unmarshal(routeCacheRoutesBytes, &(routeCacheJson.Routes))
-	log.Info("Loaded routes")
+	err = json.Unmarshal(routeCacheRoutesBytes, &(routeCacheJson.Routes))
+	if err != nil {
+		log.Info("Error unmarshalling routeCacheRoutes", "routeCacheRoutesFileName", s.cfg.RoutesFileName, "err", err)
+		return
+	}
+	log.Info("Loaded routes", "len", len(routeCacheJson.Routes), "bytes", len(routeCacheRoutesBytes))
 	routeCachePoolToRouteIdxsFile, err := os.Open(s.cfg.PoolToRouteIdxsFileName)
 	if err != nil {
 		log.Info("Error opening routeCachePoolToRouteIdxs", "routeCachePoolToRouteIdxsFileName", s.cfg.PoolToRouteIdxsFileName, "err", err)
@@ -167,7 +183,7 @@ func (s *BalancerLinearStrategy) loadJson() {
 	defer routeCachePoolToRouteIdxsFile.Close()
 	routeCachePoolToRouteIdxsBytes, _ := ioutil.ReadAll(routeCachePoolToRouteIdxsFile)
 	json.Unmarshal(routeCachePoolToRouteIdxsBytes, &(routeCacheJson.PoolToRouteIdxs))
-	log.Info("Loaded poolToRouteIdxs")
+	log.Info("Loaded poolToRouteIdxs", "len", len(routeCacheJson.PoolToRouteIdxs), "bytes", len(routeCachePoolToRouteIdxsBytes))
 	routeCache := MultiScoreRouteCache{
 		Routes:          make([][]*Leg, len(routeCacheJson.Routes)),
 		PoolToRouteIdxs: make(map[PoolKey][][]uint),
@@ -203,6 +219,7 @@ func (s *BalancerLinearStrategy) loadJson() {
 				t = UniswapV2Pair
 				s.interestedPairs[poolAddr] = t
 			}
+			s.interestedAddrs[poolAddr] = struct{}{}
 			route[x] = &Leg{
 				From:     common.HexToAddress(leg.From),
 				To:       common.HexToAddress(leg.To),
@@ -223,13 +240,21 @@ func (s *BalancerLinearStrategy) loadJson() {
 			copy(routeCache.PoolToRouteIdxs[key][i], routeIdxs)
 		}
 	}
-	log.Info("Processed route cache", "name", s.Name, "interested pools", len(s.interestedPools))
+	log.Info("Processed route cache", "name", s.Name, "len(routes)", len(routeCache.Routes), "len(PoolToRouteIdxs)", len(routeCache.PoolToRouteIdxs), "interested pools", len(s.interestedPools), "interested pairs", len(s.interestedPairs))
 	s.routeCache = routeCache
 }
 
 func (s *BalancerLinearStrategy) getRouteAmountOutBalancer(
 	route []*Leg, amountIn float64, poolsInfoOverride map[common.Address]*PoolInfoFloat, debug bool) float64 {
+	amountOut, _, _ := s.getRouteAmountOutBalancerWithStats(route, amountIn, poolsInfoOverride, debug)
+	return amountOut
+}
+
+func (s *BalancerLinearStrategy) getRouteAmountOutBalancerWithStats(
+	route []*Leg, amountIn float64, poolsInfoOverride map[common.Address]*PoolInfoFloat, debug bool) (float64, int, int) {
 	var amountOut float64
+	var cacheHits int
+	var cacheMisses int
 	if debug {
 		fmt.Printf("getRouteAmountOutBalancer, %v\n", route)
 	}
@@ -237,6 +262,28 @@ func (s *BalancerLinearStrategy) getRouteAmountOutBalancer(
 		s.mu.RLock()
 		poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, leg.PoolAddr)
 		s.mu.RUnlock()
+		cacheKey := AmountOutCacheKey{
+			TokenIn:  leg.From,
+			TokenOut: leg.To,
+			AmountIn: amountIn,
+		}
+		poolInfo.AmountOutCacheMu.Lock()
+		ao, ok := poolInfo.AmountOutCache[cacheKey]
+		poolInfo.AmountOutCacheMu.Unlock()
+		if ok {
+			amountOut = ao
+			amountIn = ao
+			cacheHits++
+			continue
+		}
+		cacheMisses++
+		if poolInfo == nil {
+			_, interestedPairOk := s.interestedPairs[leg.PoolAddr]
+			var poolId BalPoolId
+			copy(poolId[:], leg.PoolAddr.Bytes())
+			_, interestedPoolOk := s.interestedPools[poolId]
+			log.Warn("Nil poolInfo", "strategy", s.Name, "addr", leg.PoolAddr, "interestedPair", interestedPairOk, "interestedPool", interestedPoolOk, "lenInterestedPairs", len(s.interestedPairs), "lenInterestedPools", len(s.interestedPools))
+		}
 		reserveFrom, reserveTo := poolInfo.Reserves[leg.From], poolInfo.Reserves[leg.To]
 		if leg.Type == UniswapV2Pair || leg.Type == SolidlyVolatilePool {
 			amountOut = getAmountOutUniswapFloat(amountIn, reserveFrom, reserveTo, poolInfo.FeeNumerator)
@@ -274,9 +321,12 @@ func (s *BalancerLinearStrategy) getRouteAmountOutBalancer(
 				// log.Info("Amp", "amp", poolInfo.AmplificationParam)
 			}
 		}
+		poolInfo.AmountOutCacheMu.Lock()
+		poolInfo.AmountOutCache[cacheKey] = amountOut
+		poolInfo.AmountOutCacheMu.Unlock()
 		amountIn = amountOut
 	}
-	return amountOut
+	return amountOut, cacheHits, cacheMisses
 }
 
 func calcStableInvariant(amp float64, balances map[common.Address]float64) float64 {
@@ -526,16 +576,16 @@ func (s *BalancerLinearStrategy) getAmountOutCurveMeta(
 func (s *BalancerLinearStrategy) makeScores(amountIn float64) []float64 {
 	scores := make([]float64, len(s.routeCache.Routes))
 	for i, route := range s.routeCache.Routes {
-		scores[i] = s.getScore(route, nil, amountIn)
+		scores[i], _, _ = s.getScore(route, nil, amountIn)
 	}
 	return scores
 }
 
-func (s *BalancerLinearStrategy) getScore(route []*Leg, poolsInfoOverride map[common.Address]*PoolInfoFloat, amountIn float64) float64 {
+func (s *BalancerLinearStrategy) getScore(route []*Leg, poolsInfoOverride map[common.Address]*PoolInfoFloat, amountIn float64) (float64, int, int) {
 	amountIn = convertFloat(wftm, route[0].From, amountIn, s.aggregatePools)
-	amountOut := s.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
+	amountOut, cacheHits, cacheMisses := s.getRouteAmountOutBalancerWithStats(route, amountIn, poolsInfoOverride, false)
 	amountOut = convertFloat(route[0].From, wftm, amountOut, s.aggregatePools)
-	return amountOut
+	return amountOut, cacheHits, cacheMisses
 	// Spot price gradient method
 	// score := 1.0
 	// for _, leg := range route {
@@ -557,23 +607,79 @@ func (s *BalancerLinearStrategy) getScore(route []*Leg, poolsInfoOverride map[co
 	// return score
 }
 
+func (s *BalancerLinearStrategy) runScoreUpdater() {
+	meanRefreshTime := time.Duration(0)
+	mrtAlpha := 0.2
+	for {
+		r := <-s.scoreUpdateRequestChan
+		start := time.Now()
+	loop:
+		for {
+			select {
+			case u2 := <-s.scoreUpdateRequestChan:
+				for k, _ := range u2.refreshKeys {
+					r.refreshKeys[k] = struct{}{}
+				}
+				for addr, poolInfo := range u2.poolsInfoCombinedUpdates {
+					r.poolsInfoCombinedUpdates[addr] = poolInfo
+				}
+			default:
+				break loop
+			}
+		}
+		hits, misses, numRoutes := s.refreshScoresForPools(r.refreshKeys, r.poolsInfoCombinedUpdates, start)
+		lag := time.Now().Sub(start)
+		meanRefreshTime = time.Duration(float64(lag)*mrtAlpha + float64(meanRefreshTime)*(1-mrtAlpha))
+		if lag > time.Second {
+			log.Info("Score updater done computing updates", "name", s.Name, "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.scoreUpdateRequestChan), "updates", len(r.poolsInfoCombinedUpdates), "meanRefreshTime", meanRefreshTime, "hits", hits, "misses", misses, "routes", numRoutes)
+		}
+	}
+}
+
 func (s *BalancerLinearStrategy) refreshScoresForPools(
-	keys map[PoolKey]struct{}, poolsInfoOverride map[common.Address]*PoolInfoFloat, start time.Time) {
-	var allRouteIdxs []uint
+	keys map[PoolKey]struct{}, poolsInfoOverride map[common.Address]*PoolInfoFloat, start time.Time) (totalCacheHits, totalCacheMisses, numRoutes int) {
+	// var allRouteIdxs []uint
+	refreshed := make([]bool, len(s.routeCache.Routes))
+	routeIdxCounts := make([]int, len(s.routeCache.Routes))
 	for key, _ := range keys {
-		if routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]; ok {
-			allRouteIdxs = append(allRouteIdxs, routeIdxs[0]...)
+		routeIdxs, ok := s.routeCache.PoolToRouteIdxs[key]
+		if !ok {
+			continue
 		}
-	}
-	sort.Slice(allRouteIdxs, func(a, b int) bool { return a < b })
-	allRouteIdxs = uniq(allRouteIdxs)
-	// log.Info("State updater done uniq", "t", utils.PrettyDuration(time.Now().Sub(start)), "keys", len(keys))
-	for _, routeIdx := range allRouteIdxs {
-		route := s.routeCache.Routes[routeIdx]
+		// allRouteIdxs = append(allRouteIdxs, routeIdxs[0]...)
 		for i := 0; i < len(ScoreTiers); i++ {
-			s.routeCache.Scores[i][routeIdx] = s.getScore(route, poolsInfoOverride, ScoreTiers[i])
+			h := RouteIdxHeap{s.routeCache.Scores[i], routeIdxs[i]}
+			heap.Init(&h)
+			fastForward := false
+			for routeIdx := heap.Pop(&h).(uint); h.Len() > 0; routeIdx = heap.Pop(&h).(uint) {
+				if refreshed[routeIdx] {
+					continue
+				}
+				routeIdxCounts[routeIdx]++
+				if fastForward && routeIdxCounts[routeIdx] < 2 {
+					continue
+				}
+				route := s.routeCache.Routes[routeIdx]
+				score, cacheHits, cacheMisses := s.getScore(route, poolsInfoOverride, ScoreTiers[i])
+				s.routeCache.Scores[i][routeIdx] = score
+				totalCacheHits += cacheHits
+				totalCacheMisses += cacheMisses
+				refreshed[routeIdx] = true
+				if score < ScoreTiers[i] {
+					numOverrideLegs := 0
+					for _, leg := range route {
+						if _, ok := poolsInfoOverride[leg.PoolAddr]; ok {
+							numOverrideLegs++
+						}
+					}
+					if numOverrideLegs < 2 {
+						fastForward = true
+					}
+				}
+			}
 		}
 	}
+	return totalCacheHits, totalCacheMisses, len(refreshed)
 }
 
 func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFraction float64) *PoolInfoFloat {
@@ -605,6 +711,7 @@ func (s *BalancerLinearStrategy) makePoolInfoFloat(p *PoolUpdate, minChangeFract
 		Reserves:           reserves,
 		Tokens:             poolInfo.Tokens,
 		Weights:            poolInfo.Weights,
+		AmountOutCache:     make(map[AmountOutCacheKey]float64),
 		ScaleFactors:       poolInfo.ScaleFactors,
 		AmplificationParam: poolInfo.AmplificationParam,
 		Fee:                poolInfo.Fee,
@@ -627,7 +734,6 @@ func (s *BalancerLinearStrategy) runStateUpdater() {
 			PendingUpdates: make(map[common.Address]*PoolUpdate),
 		}
 		u := <-s.inStateUpdatesChan
-		start := time.Now()
 		copyStateUpdate(&batch, &u)
 	loop:
 		for {
@@ -678,8 +784,10 @@ func (s *BalancerLinearStrategy) runStateUpdater() {
 				PoolsInfoPendingUpdates: poolsInfoPendingUpdates,
 			}
 			s.poolsInfoUpdateChan <- update
-			s.refreshScoresForPools(refreshKeys, poolsInfoCombinedUpdates, start)
-			// log.Info("State updater done computing updates", "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.inStateUpdatesChan), "updates", len(poolsInfoUpdates))
+			s.scoreUpdateRequestChan <- ScoreUpdateRequest{
+				refreshKeys:              refreshKeys,
+				poolsInfoCombinedUpdates: poolsInfoCombinedUpdates,
+			}
 		}
 	}
 }

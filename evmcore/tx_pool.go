@@ -356,7 +356,7 @@ type TxPool struct {
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
 
 	dexterTxChan           chan *dexter.TxWithTimeLog
-	dexterFriendlyFireChan chan *types.Transaction
+	dexterFriendlyFireChan chan *dexter.TxFriendlyFire
 	specialMethods         map[[4]byte]struct{}
 	specialMethodsMu       sync.RWMutex
 	toBlacklist            map[common.Address]struct{}
@@ -427,7 +427,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain State
 	return pool
 }
 
-func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan *types.Transaction) {
+func (pool *TxPool) AttachDexter(c chan *dexter.TxWithTimeLog, f chan *dexter.TxFriendlyFire) {
 	pool.dexterTxChan = c
 	pool.dexterFriendlyFireChan = f
 }
@@ -1095,6 +1095,7 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	}
 
 	if pool.dexterTxChan != nil && !local {
+		sourceTxs := make(map[common.Hash]*types.Transaction)
 		for _, tx := range news {
 			interest := pool.hackCheckIncomingTx(tx)
 			if interest == PotentialTarget {
@@ -1105,9 +1106,20 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 				default:
 					log.Info("dexterTxChan full", "len", len(pool.dexterTxChan))
 				}
+				sourceTxs[tx.Hash()] = tx
 			} else if interest == DexterFriendlyFire {
+				txff := &dexter.TxFriendlyFire{
+					Tx: tx,
+				}
+				var targetTxHash common.Hash
+				copy(targetTxHash[:], tx.Data()[4:36])
+				if target, ok := sourceTxs[targetTxHash]; ok {
+					txff.TargetTx = target
+				} else {
+					txff.TargetTx = pool.Get(targetTxHash)
+				}
 				select {
-				case pool.dexterFriendlyFireChan <- tx:
+				case pool.dexterFriendlyFireChan <- txff:
 				default:
 				}
 			}
