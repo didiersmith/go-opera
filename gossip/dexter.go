@@ -17,6 +17,7 @@ import (
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_stable_pool"
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_vault"
 	"github.com/Fantom-foundation/go-opera/contracts/balancer_v2_weighted_pool"
+	"github.com/Fantom-foundation/go-opera/contracts/curve_base_plain_pool"
 	"github.com/Fantom-foundation/go-opera/contracts/curve_factory"
 	"github.com/Fantom-foundation/go-opera/contracts/curve_registry"
 	"github.com/Fantom-foundation/go-opera/contracts/fish8_lite"
@@ -130,7 +131,7 @@ var (
 		common.HexToAddress("0xa0677656E1939fc53244B6e383164e3Ac2a1eEed"): "Alexandra Occasional Cortex",
 		common.HexToAddress("0xF501d66f609290D1E6759dFcFA88F869A82fDC97"): "Husky 501",
 		common.HexToAddress("0xa775eBB05Aff8c46048e66FF3fc76A53c3801245"): "Creative accountant",
-		common.HexToAddress("0xc29aACEa6Fb1D5d1Ebe38D88Cd5C8a8eb397f316"): "New kid on the block",
+		common.HexToAddress("0x49d6021b493cb6f1C5e6527BEAE9854a3314d2c0"): "New kid on the block",
 		common.HexToAddress("0xcB00E3db4c4DCB7B07A2f9A89b6AaBac8E9c6B6D"): "Sea Boo",
 		common.HexToAddress("0xd20d27d5cB769522410e0A2f32000C947af7Ffe5"): "Dee Twenny",
 		common.HexToAddress("0xd8Fc012498F4278095F10190DD3F29a8A2f16a52"): "Mr Million",
@@ -338,6 +339,7 @@ func NewDexter(svc *Service) *Dexter {
 			// 	RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-3.json",
 			// 	PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-3.json",
 			// }),
+
 			dexter.NewLinearStrategy("Linear 2-4", 0, d.railgunChan, dexter.LinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/solidly_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
@@ -352,6 +354,11 @@ func NewDexter(svc *Service) *Dexter {
 				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 			}),
+
+			// 			dexter.NewBalancerLinearStrategy("Curve 2-3", 0, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			// 				RoutesFileName:          root + "route_caches/curve_no_lending_routes_len2-3.json",
+			// 				PoolToRouteIdxsFileName: root + "route_caches/curve_no_lending_poolToRouteIdxs_len2-3.json",
+			// 			}),
 
 			dexter.NewBalancerLinearStrategy("Curve 2-4", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/curve_plain_routes_len2-4.json",
@@ -460,12 +467,13 @@ func NewDexter(svc *Service) *Dexter {
 			}
 			fee := d.getSwapFeePercentage(&poolAddr, t)
 			poolInfo := dexter.PoolInfo{
-				Fee:          fee,
-				Reserves:     make(map[common.Address]*big.Int),
-				Weights:      make(map[common.Address]*big.Int),
-				ScaleFactors: make(map[common.Address]*big.Int),
-				LastUpdate:   time.Now(),
-				Type:         t,
+				Fee:                fee,
+				Reserves:           make(map[common.Address]*big.Int),
+				UnderlyingReserves: make(map[common.Address]*big.Int),
+				Weights:            make(map[common.Address]*big.Int),
+				ScaleFactors:       make(map[common.Address]*big.Int),
+				LastUpdate:         time.Now(),
+				Type:               t,
 			}
 			if t == dexter.BalancerWeightedPool || t == dexter.BalancerStablePool {
 				d.poolsInfo[poolAddr] = &poolInfo
@@ -505,6 +513,22 @@ func NewDexter(svc *Service) *Dexter {
 					poolInfo.ScaleFactors[tokAddr] = scaleFactor
 				}
 				poolInfo.AmplificationParam = d.getAmplificationParameter(poolAddr, t)
+				if t == dexter.CurveFactoryMetaPool {
+					poolInfo.UnderlyingTokens = d.getUnderlyingTokensCurve(poolAddr, t)
+					underlyingBalances := d.getUnderlyingBalancesCurve(poolAddr, t)
+					for i, bal := range underlyingBalances {
+						poolInfo.UnderlyingReserves[poolInfo.UnderlyingTokens[i]] = bal
+					}
+					for _, tokAddr := range poolInfo.UnderlyingTokens {
+						decimals := d.decimals(&tokAddr)
+						decimalsDiff := int64(18 - decimals)
+						scaleFactor := new(big.Int).Exp(big.NewInt(10), big.NewInt(decimalsDiff), nil)
+						poolInfo.ScaleFactors[tokAddr] = scaleFactor
+					}
+					// log.Warn("Curve metapool", "underlyingTokens", poolInfo.UnderlyingTokens, "underlyingBalances", underlyingBalances, "ur", poolInfo.UnderlyingReserves)
+				} else if t == dexter.CurveBasePlainPool {
+					poolInfo.MetaTokenSupply = d.getMetaTokenSupply(poolAddr)
+				}
 				balances := d.getBalancesCurve(poolAddr, t)
 				// log.Info("Curve pool info", "addr", poolAddr, "info", poolInfo)
 				for i, bal := range balances {
@@ -1190,18 +1214,30 @@ func (d *Dexter) processPendingLogs(l *types.Log, statedb *state.StateDB) *dexte
 			u.Reserves[tokAddr] = pool.Balances[i]
 		}
 		return u
-	} else if poolInfo, ok := d.poolsInfo[l.Address]; ok && (poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool) {
+	} else if poolInfo, ok := d.poolsInfo[l.Address]; ok &&
+		(poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool ||
+			poolInfo.Type == dexter.CurveFactoryMetaPool) {
 		evm := d.getEvm(statedb, d.evmState.evmStateReader, d.evmState.bs.LastBlock.Idx)
 		tokens := d.getTokensCurveFromEvm(l.Address, poolInfo.Type, evm)
 		balances := d.getBalancesCurveFromEvm(l.Address, poolInfo.Type, evm)
 		u := &dexter.PoolUpdate{
-			Addr:     l.Address,
-			Reserves: make(map[common.Address]*big.Int),
+			Addr:               l.Address,
+			Reserves:           make(map[common.Address]*big.Int),
+			UnderlyingReserves: make(map[common.Address]*big.Int),
 		}
 		for i, tokAddr := range tokens {
 			u.Reserves[tokAddr] = balances[i]
 		}
-		// log.Info("Processed pending log of curve pool", "addr", l.Address, "reserves", u.Reserves)
+		if poolInfo.Type == dexter.CurveBasePlainPool {
+			u.MetaTokenSupply = d.getMetaTokenSupplyFromEvm(l.Address, evm)
+		} else if poolInfo.Type == dexter.CurveFactoryMetaPool {
+			underlyingTokens := d.getUnderlyingTokensCurveFromEvm(l.Address, poolInfo.Type, evm)
+			underlyingBalances := d.getUnderlyingBalancesCurveFromEvm(l.Address, poolInfo.Type, evm)
+			for i, bal := range underlyingBalances {
+				u.UnderlyingReserves[underlyingTokens[i]] = bal
+			}
+		}
+		// log.Info("Processed pending log of curve pool", "addr", l.Address, "reserves", u.Reserves, "update", u)
 		return u
 	}
 	return nil
@@ -1267,7 +1303,9 @@ func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
 			copy(poolId[:], l.Topics[1].Bytes())
 			updatedPools = append(updatedPools, poolId)
 			// log.Info("Balancer swap event", "topics", l.Topics, "l", l.Data)
-		} else if poolInfo, ok := d.poolsInfo[l.Address]; ok && (poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool) {
+		} else if poolInfo, ok := d.poolsInfo[l.Address]; ok &&
+			(poolInfo.Type == dexter.CurveBasePlainPool || poolInfo.Type == dexter.CurveFactoryPlainPool ||
+				poolInfo.Type == dexter.CurveFactoryMetaPool) {
 			updatedCurvePools[l.Address] = poolInfo.Type
 			// log.Warn("Curve pool event", "topics", l.Topics, "l", l.Data)
 			// } else if poolAddr, amountIn0, _, _, _ := getAmountsFromSwapLog(l); poolAddr != nil { // Hansel
@@ -1310,11 +1348,24 @@ func (d *Dexter) processTx(txWTL *dexter.TxWithTimeLog) {
 		tokens := d.getTokensCurveFromEvm(poolAddr, t, evm)
 		balances := d.getBalancesCurveFromEvm(poolAddr, t, evm)
 		u := dexter.PoolUpdate{
-			Addr:     poolAddr,
-			Reserves: make(map[common.Address]*big.Int),
+			Addr:               poolAddr,
+			Reserves:           make(map[common.Address]*big.Int),
+			UnderlyingReserves: make(map[common.Address]*big.Int),
 		}
 		for i, tokAddr := range tokens {
 			u.Reserves[tokAddr] = balances[i]
+		}
+		if t == dexter.CurveBasePlainPool {
+			u.MetaTokenSupply = d.getMetaTokenSupplyFromEvm(poolAddr, evm)
+		} else if t == dexter.CurveFactoryMetaPool {
+			underlyingTokens := d.getUnderlyingTokensCurveFromEvm(poolAddr, t, evm)
+			underlyingBalances := d.getUnderlyingBalancesCurveFromEvm(poolAddr, t, evm)
+			for i, tokAddr := range underlyingTokens {
+				// if len(u.UnderlyingReserves) = 0 {
+				// 	log.Warn("Nil map", "addr", poolAddr, "
+				// }
+				u.UnderlyingReserves[tokAddr] = underlyingBalances[i]
+			}
 		}
 		ptxUpdates = append(ptxUpdates, u)
 	}
@@ -1696,19 +1747,22 @@ func (d *Dexter) getReserve(poolType dexter.PoolType, poolId dexter.BalPoolId, t
 	}
 	return big.NewInt(0)
 }
+
 func (d *Dexter) diagnoseTx(tx *types.Transaction, f *FiredTx) {
 	for _, reserve := range f.Plan.Reserves {
 		reserve.Actual = d.getReserve(reserve.Type, reserve.PoolId, reserve.Token)
 		actualFloat := dexter.BigIntToFloat(reserve.Actual)
-		log.Info("reserve", "pool",
-			common.Bytes2Hex([]byte(reserve.PoolId[:])),
-			"tok", reserve.Token,
-			"o", reserve.Original,
-			"p", reserve.Predicted,
-			"a", reserve.Actual,
-			"diff", new(big.Int).Sub(reserve.Actual, reserve.Predicted),
-			"%", (100 * (actualFloat - dexter.BigIntToFloat(reserve.Predicted)) / actualFloat),
-		)
+		if new(big.Int).Sub(reserve.Actual, reserve.Predicted).Cmp(big.NewInt(0)) != 0 {
+			log.Warn("reserve",
+				"pool", common.Bytes2Hex([]byte(reserve.PoolId[:])),
+				"tok", reserve.Token,
+				"o", reserve.Original,
+				"p", reserve.Predicted,
+				"a", reserve.Actual,
+				"diff", new(big.Int).Sub(reserve.Actual, reserve.Predicted),
+				"%", (100 * (actualFloat - dexter.BigIntToFloat(reserve.Predicted)) / actualFloat),
+			)
+		}
 	}
 }
 
@@ -1784,7 +1838,7 @@ func (d *Dexter) getAmplificationParameter(addr common.Address, t dexter.PoolTyp
 		msg = d.readOnlyMessage(&addr, getAmplificationParameterAbi)
 	} else if t == dexter.CurveBasePlainPool {
 		msg = d.readOnlyMessage(&cRegistryAddr, curve_registry.GetAmplificationParameter(addr))
-	} else if t == dexter.CurveFactoryPlainPool {
+	} else if t == dexter.CurveFactoryPlainPool || t == dexter.CurveFactoryMetaPool {
 		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetAmplificationParameter(addr))
 	}
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
@@ -1812,6 +1866,25 @@ func (d *Dexter) getNormalizedWeights(addr *common.Address) []*big.Int {
 	return balancer_v2_weighted_pool.UnpackGetNormalizedWeights(result.ReturnData)
 }
 
+func (d *Dexter) getMetaTokenSupply(addr common.Address) *big.Int {
+	evm := d.getReadOnlyEvm()
+	return d.getMetaTokenSupplyFromEvm(addr, evm)
+}
+
+func (d *Dexter) getMetaTokenSupplyFromEvm(addr common.Address, evm *vm.EVM) *big.Int {
+	var msg types.Message
+	msg = d.readOnlyMessage(&addr, curve_base_plain_pool.GetTokenSupply())
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getAmplificationParameter error", "err", err)
+		return nil
+	}
+	a := new(big.Int).SetBytes(result.ReturnData[:32])
+	// log.Info("MetatokenSupply", "addr", addr, "Supply", a)
+	return a
+}
+
 func (d *Dexter) getTokensCurve(addr common.Address, t dexter.PoolType) []common.Address {
 	evm := d.getReadOnlyEvm()
 	return d.getTokensCurveFromEvm(addr, t, evm)
@@ -1824,7 +1897,7 @@ func (d *Dexter) getTokensCurveFromEvm(addr common.Address, t dexter.PoolType, e
 	} else if t == dexter.CurveFactoryPlainPool {
 		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetCoins(addr))
 	} else if t == dexter.CurveFactoryMetaPool {
-		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetUnderlyingCoins(addr))
+		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetCoins(addr))
 	}
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
 	result, err := evmcore.ApplyMessage(evm, msg, gp)
@@ -1838,6 +1911,38 @@ func (d *Dexter) getTokensCurveFromEvm(addr common.Address, t dexter.PoolType, e
 	} else if t == dexter.CurveFactoryPlainPool {
 		tokens = curve_factory.UnpackGetCoins(result.ReturnData)
 	} else if t == dexter.CurveFactoryMetaPool {
+		tokens = curve_factory.UnpackGetCoins(result.ReturnData)
+	}
+	var filteredTokens []common.Address
+	for _, tok := range tokens {
+		if tok == nullAddr {
+			// log.Info("Encountered nullAddr")
+			continue
+		}
+		filteredTokens = append(filteredTokens, tok)
+	}
+	return filteredTokens
+}
+
+func (d *Dexter) getUnderlyingTokensCurve(addr common.Address, t dexter.PoolType) []common.Address {
+	evm := d.getReadOnlyEvm()
+	return d.getUnderlyingTokensCurveFromEvm(addr, t, evm)
+}
+
+// Gets the token addresses for underlying tokens in curve metapools
+func (d *Dexter) getUnderlyingTokensCurveFromEvm(addr common.Address, t dexter.PoolType, evm *vm.EVM) []common.Address {
+	var msg types.Message
+	if t == dexter.CurveFactoryMetaPool {
+		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetUnderlyingCoins(addr))
+	}
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getUnderlyingTokensCurve error", "err", err)
+		return nil
+	}
+	var tokens []common.Address
+	if t == dexter.CurveFactoryMetaPool {
 		tokens = curve_factory.UnpackGetUnderlyingCoins(result.ReturnData)
 	}
 	var filteredTokens []common.Address
@@ -1862,6 +1967,8 @@ func (d *Dexter) getBalancesCurveFromEvm(poolAddr common.Address, t dexter.PoolT
 		msg = d.readOnlyMessage(&cRegistryAddr, curve_registry.GetBalances(poolAddr))
 	} else if t == dexter.CurveFactoryPlainPool {
 		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetBalances(poolAddr))
+	} else if t == dexter.CurveFactoryMetaPool {
+		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetBalances(poolAddr))
 	}
 	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
 	result, err := evmcore.ApplyMessage(evm, msg, gp)
@@ -1874,6 +1981,8 @@ func (d *Dexter) getBalancesCurveFromEvm(poolAddr common.Address, t dexter.PoolT
 		balances = curve_factory.UnpackGetBalances(result.ReturnData)
 	} else if t == dexter.CurveFactoryPlainPool {
 		balances = curve_factory.UnpackGetBalances(result.ReturnData)
+	} else if t == dexter.CurveFactoryMetaPool {
+		balances = curve_factory.UnpackGetBalances(result.ReturnData)
 	}
 	var filteredBalances []*big.Int
 	zero := big.NewInt(0)
@@ -1883,7 +1992,37 @@ func (d *Dexter) getBalancesCurveFromEvm(poolAddr common.Address, t dexter.PoolT
 		}
 		filteredBalances = append(filteredBalances, bal)
 	}
+	return filteredBalances
+}
 
+func (d *Dexter) getUnderlyingBalancesCurve(poolAddr common.Address, t dexter.PoolType) []*big.Int {
+	evm := d.getReadOnlyEvm()
+	return d.getUnderlyingBalancesCurveFromEvm(poolAddr, t, evm)
+}
+
+// Gets the balances for meta tokens in curve metapools
+func (d *Dexter) getUnderlyingBalancesCurveFromEvm(poolAddr common.Address, t dexter.PoolType, evm *vm.EVM) []*big.Int {
+	var msg types.Message
+	if t == dexter.CurveFactoryMetaPool {
+		msg = d.readOnlyMessage(&cFactoryAddr, curve_factory.GetUnderlyingBalances(poolAddr))
+	}
+	gp := new(evmcore.GasPool).AddGas(math.MaxUint64)
+	result, err := evmcore.ApplyMessage(evm, msg, gp)
+	if err != nil {
+		log.Error("getUnderlyingBalancesCurve error", "err", err)
+	}
+	var balances []*big.Int
+	if t == dexter.CurveFactoryMetaPool {
+		balances = curve_factory.UnpackGetUnderlyingBalances(result.ReturnData)
+	}
+	var filteredBalances []*big.Int
+	zero := big.NewInt(0)
+	for _, bal := range balances {
+		if bal.Cmp(zero) == 0 {
+			continue
+		}
+		filteredBalances = append(filteredBalances, bal)
+	}
 	return filteredBalances
 }
 

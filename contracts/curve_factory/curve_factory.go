@@ -60,6 +60,23 @@ func UnpackGetBalances(data []byte) []*big.Int {
 	return b[:]
 }
 
+func GetUnderlyingBalances(poolAddr common.Address) []byte {
+	data, err := sAbi.Pack("get_underlying_balances", poolAddr)
+	if err != nil {
+		log.Error("Error packing get_underlying_balances", "err", err)
+	}
+	return data
+}
+
+func UnpackGetUnderlyingBalances(data []byte) []*big.Int {
+	out, err := sAbi.Unpack("get_underlying_balances", data)
+	if err != nil {
+		log.Error("Error unpacking get_underlying_balances", "err", err)
+	}
+	b := out[0].([8]*big.Int)
+	return b[:]
+}
+
 func GetCoins(poolAddr common.Address) []byte {
 	data, err := sAbi.Pack("get_coins", poolAddr)
 	if err != nil {

@@ -29,6 +29,7 @@ var (
 	kiloIn                     = 1e21
 	MaxAmountIn                = new(big.Int).Mul(big.NewInt(2547), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	minChangeFrac              = 0.00001
+	CURVE2POOLADDR             = common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
 )
 
 const (
@@ -177,14 +178,18 @@ func copyStateUpdate(to, from *StateUpdate) {
 }
 
 type PoolUpdate struct {
-	Addr     common.Address
-	Reserves map[common.Address]*big.Int
-	Time     time.Time
+	Addr               common.Address
+	Reserves           map[common.Address]*big.Int
+	UnderlyingReserves map[common.Address]*big.Int
+	MetaTokenSupply    *big.Int
+	Time               time.Time
 }
 
 type PoolInfo struct {
 	Tokens             []common.Address
+	UnderlyingTokens   []common.Address
 	Reserves           map[common.Address]*big.Int
+	UnderlyingReserves map[common.Address]*big.Int
 	Weights            map[common.Address]*big.Int
 	FeeNumerator       *big.Int
 	Fee                *big.Int
@@ -192,11 +197,14 @@ type PoolInfo struct {
 	ScaleFactors       map[common.Address]*big.Int
 	LastUpdate         time.Time
 	Type               PoolType
+	MetaTokenSupply    *big.Int
 }
 
 type PoolInfoFloat struct {
 	Tokens             []common.Address
+	UnderlyingTokens   []common.Address
 	Reserves           map[common.Address]float64
+	UnderlyingReserves map[common.Address]float64
 	Weights            map[common.Address]float64
 	FeeNumerator       float64
 	FeeNumeratorBI     *big.Int
@@ -426,14 +434,23 @@ func getPoolInfo(poolsInfo, poolsInfoOverride map[common.Address]*PoolInfo, pool
 func getPoolInfoFloat(poolsInfo, poolsInfoPending, poolsInfoOverride map[common.Address]*PoolInfoFloat, poolAddr common.Address) *PoolInfoFloat {
 	if poolsInfoOverride != nil {
 		if poolInfo, ok := poolsInfoOverride[poolAddr]; ok {
+			// if bytes.Compare(poolAddr.Bytes(), common.HexToAddress("0x7a656B342E14F745e2B164890E88017e27AE7320").Bytes()) == 0 {
+			// 	log.Info("Frax 2pool getPoolInfoFloat returning from poolsInfoOverride", "poolInfo", poolInfo)
+			// }
 			return poolInfo
 		}
 	}
 	if poolInfo, ok := poolsInfoPending[poolAddr]; ok && time.Now().Sub(poolInfo.LastUpdate) < 4*time.Second {
 		// log.Info("Returning override for", "poolAddr", poolAddr, "time diff", utils.PrettyDuration(time.Now().Sub(poolInfo.LastUpdate)))
+		// if bytes.Compare(poolAddr.Bytes(), common.HexToAddress("0x7a656B342E14F745e2B164890E88017e27AE7320").Bytes()) == 0 {
+		// 	log.Info("Frax 2pool getPoolInfoFloat returning from pending", "poolInfo", poolInfo)
+		// }
 		return poolInfo
 	}
 	poolInfo := poolsInfo[poolAddr]
+	// if bytes.Compare(poolAddr.Bytes(), common.HexToAddress("0x7a656B342E14F745e2B164890E88017e27AE7320").Bytes()) == 0 {
+	// 	log.Info("Frax 2pool getPoolInfoFloat returning from permanent", "poolInfo", poolInfo)
+	// }
 	return poolInfo
 }
 
