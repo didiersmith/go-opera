@@ -44,25 +44,9 @@ func TestCurveAmountOut(t *testing.T) {
 		var expectedInvariant float64 = 3014037308501370133548055
 		// fmt.Printf("Invariant: %v\n", invariant)
 		if assert.InDelta(expectedInvariant, invariant, 1e9) {
-			fmt.Println("\tInvariant: \t\tPASS")
+			fmt.Println("\tInvariant: \t\t\t\tPASS")
 		}
 	})
-
-	// t.Run("getTokenBalanceGivenInvAndBalances", func(t *testing.T) {
-	// 	assert := assert.New(t)
-	// 	amp := 3250000.
-	// 	balances := map[common.Address]float64{
-	// 		common.HexToAddress("0x1"): 14692118844975178000000000000.,
-	// 		common.HexToAddress("0x2"): 1682595164225370133548061.,
-	// 	}
-	// 	invariant := calcStableInvariant(amp, balances)
-	// 	getTokBalances := getTokenBalanceGivenInvAndBalances(amp, invariant, balances, balances[common.HexToAddress("0x1")], common.HexToAddress("0x1"), common.HexToAddress("0x2"))
-	// 	var expectedOut float64 = 4879695783742
-	// 	// fmt.Printf("tokBalancesOut: %v\n", getTokBalances)
-	// 	if assert.InDelta(expectedOut, getTokBalances, 1) {
-	// 		fmt.Println("\tgetTokenBalancesOut: \tPASS")
-	// 	}
-	// })
 
 	t.Run("getAmountOut 2pool", func(t *testing.T) {
 		assert := assert.New(t)
@@ -123,54 +107,6 @@ func TestCurveAmountOut(t *testing.T) {
 			fmt.Println("\tamountOut - WBTC pool: \t\t\tPASS")
 		}
 	})
-
-	// 	t.Run("getAmountOut fUSDT2pool", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		metaAddr := common.HexToAddress("0x92d5ebf3593a92888c25c0abef126583d4b5312e")
-	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x049d68029688eabf473097a2fc38ef61633a3c7a"),
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
-	// 			},
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 1e5,
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x049d68029688eabf473097a2fc38ef61633a3c7a"): 59585514223000000000000.0,
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 54029161880408678441806.0,
-	// 			},
-	// 		}
-	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 45e4,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 16774884445458000000000000.0,
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 25650718197403118611089349.0,
-	// 			},
-	// 			MetaTokenSupply: 41872687793387275189116311.,
-	// 		}
-	// 		underlyingBals := map[common.Address]float64{
-	// 			common.HexToAddress("0x049d68029688eabf473097a2fc38ef61633a3c7a"): 59585514223000000000000.0,
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 21644967041000000000000.0,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 33097631866256823332535.0,
-	// 		}
-	// 		scaleIn := 1e12
-	// 		scaleOut := 1.
-	// 		var amountIn float64 = 1e6
-	// 		tokenIn := common.HexToAddress("0x049d68029688eabf473097a2fc38ef61633a3c7a")
-	// 		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-	// 		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-	// 		var expectedOut float64 = 986081361543853258.
-	// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 			fmt.Println("\tamountOut - fUSDT2Pool (fUSDT->DAI): \tPASS")
-	// 		}
-	// 	})
 
 	t.Run("getAmountOut 2pool plain pool", func(t *testing.T) {
 		assert := assert.New(t)
@@ -276,218 +212,340 @@ func TestCurveAmountOut(t *testing.T) {
 		}
 	})
 
-	// 	t.Run("getAmountOut FRAX2pool", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
-	// 			},
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 2e5,
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26533451786919290911841471.0,
-	// 			},
-	// 		}
-	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 45e4,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18310134618553000000000000.0,
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246307080429008537424351.0,
-	// 			},
-	// 			MetaTokenSupply: 41018100462201771561650475.,
-	// 		}
-	// 		underlyingBals := map[common.Address]float64{
-	// 			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11844303362082000000000000.0,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 15037372408487387024159281.0,
-	// 		}
-	// 		scaleIn := 1e12
-	// 		scaleOut := 1.
-	// 		var amountIn float64 = 1e5
-	// 		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-	// 		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-	// 		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-	// 		var expectedOut float64 = 100014180546366086.
-	// 		// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 			fmt.Println("\tamountOut - FRAX2pool (USDC->DAI): \tPASS")
-	// 		}
-	// 	})
+	t.Run("getAmountOut FRAX2pool", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26533451786919290911841471.0,
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41391354083316194165402004.0,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11844303362082000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 15037372408487387024159281.0,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18310134618553000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246307080429008537424351.0,
+			},
+			MetaTokenSupply: 41018100462201771561650475.,
+		}
+		scaleIn := 1e12
+		scaleOut := 1.
+		var amountIn float64 = 1e5
+		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 100014180546366086.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e10) {
+			fmt.Println("\tamountOut - FRAX2pool (USDC->DAI): \tPASS")
+		}
+	})
 
-	// 	t.Run("getAmountOut FRAX2pool - 2", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
-	// 			},
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 2e5,
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
-	// 			},
-	// 		}
-	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 45e4,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
-	// 			},
-	// 			MetaTokenSupply: 41450959355740333479476479.,
-	// 		}
-	// 		underlyingBals := map[common.Address]float64{
-	// 			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
-	// 		}
-	// 		scaleIn := 1.
-	// 		scaleOut := 1.
-	// 		var amountIn float64 = 1e18
-	// 		tokenIn := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
-	// 		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-	// 		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-	// 		var expectedOut float64 = 997287797628906173.
-	// 		// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 			fmt.Println("\tamountOut - FRAX2pool (FRAX->DAI): \tPASS")
-	// 		}
-	// 	})
+	t.Run("getAmountOut FRAX2pool - 2", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
+			},
+			MetaTokenSupply: 41450959355740333479476479.,
+		}
+		scaleIn := 1.
+		scaleOut := 1.
+		var amountIn float64 = 1e18
+		tokenIn := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
+		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 997287797628906173.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e10) {
+			fmt.Println("\tamountOut - FRAX2pool (FRAX->DAI): \tPASS")
+		}
+	})
 
-	// 	t.Run("getAmountOut FRAX2pool - 3", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
-	// 			},
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 2e5,
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
-	// 			},
-	// 		}
-	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 45e4,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
-	// 			},
-	// 			MetaTokenSupply: 41450959355740333479476479.,
-	// 		}
-	// 		underlyingBals := map[common.Address]float64{
-	// 			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
-	// 		}
-	// 		scaleIn := 1.
-	// 		scaleOut := 1.
-	// 		var amountIn float64 = 1e18
-	// 		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-	// 		tokenOut := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
-	// 		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-	// 		var expectedOut float64 = 1002097687116900269.
-	// 		// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 			fmt.Println("\tamountOut - FRAX2pool (USDC->FRAX): \tPASS")
-	// 		}
-	// 	})
+	t.Run("getAmountOut FRAX2pool - 3", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
+			},
+			MetaTokenSupply: 41450959355740333479476479.,
+		}
+		scaleIn := 1e12
+		scaleOut := 1.
+		var amountIn float64 = 1e6
+		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		tokenOut := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 1002097687116900269.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e10) {
+			fmt.Println("\tamountOut - FRAX2pool (USDC->FRAX): \tPASS")
+		}
+	})
 
-	// 	t.Run("getAmountOut FRAX2pool - 4", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
-	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
-	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 2e5,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
-	// 			},
-	// 		}
-	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
-	// 			Fee:                4e-4,
-	// 			AmplificationParam: 45e4,
-	// 			Tokens: []common.Address{
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
-	// 			},
-	// 			Reserves: map[common.Address]float64{
-	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
-	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
-	// 			},
-	// 			MetaTokenSupply: 41450959355740333479476479.,
-	// 		}
-	// 		underlyingBals := map[common.Address]float64{
-	// 			common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
-	// 		}
-	// 		scaleIn := 1.
-	// 		scaleOut := 1.
-	// 		var amountIn float64 = 1e18
-	// 		tokenIn := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
-	// 		tokenOut := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-	// 		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, underlyingBals, poolsInfoOverride)
-	// 		var expectedOut float64 = 996685000000000000.
-	// 		// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e12) {
-	// 			fmt.Println("\tamountOut - FRAX2pool (FRAX->USDC): \tPASS")
-	// 		}
-	// 	})
+	t.Run("getAmountOut FRAX2pool - 4", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 26528109706264052682161839.0,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355"): 41396779837353507386939604.0,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 11651222754819000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 14877328406060889758137148.0,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 18205381619809000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 23246267521881335438806618.0,
+			},
+			MetaTokenSupply: 41450959355740333479476479.,
+		}
+		scaleIn := 1.
+		scaleOut := 1.
+		var amountIn float64 = 1e18
+		tokenIn := common.HexToAddress("0xdc301622e621166bd8e82f2ca0a26c13ad0be355")
+		tokenOut := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 996685000000000000.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e12) {
+			fmt.Println("\tamountOut - FRAX2pool (FRAX->USDC): \tPASS")
+		}
+	})
 
-	// 	t.Run("getAmountOut FraxTUSD 4pool", func(t *testing.T) {
-	// 		assert := assert.New(t)
-	// 		var amountIn float64 = 1e5
-	// 		amp := 400000.
-	// 		fee := 0.0008
-	// 		balances := map[common.Address]float64{
-	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 7.2812862275e25,
-	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 68707939965950040078826.000,
-	// 			common.HexToAddress("0x9879aBDea01a879644185341F7aF7d8343556B7a"): 137606709693263190934363.000,
-	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 139270205990166539790318.000,
-	// 		}
-	// 		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
-	// 		tokenOut := common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E")
-	// 		amountOut := getAmountOutBalancerStable(
-	// 			amountIn, fee, amp, balances, tokenIn, tokenOut, math.Pow(10, 12), 1)
-	// 		var expectedOut float64 = 99893378459147657.
-	// 		// fmt.Printf("amountOut: %v\n", amountOut)
-	// 		if assert.InDelta(expectedOut, amountOut, 1e10) {
-	// 			fmt.Println("\tamountOut - curve 2pool: \t\tPASS")
-	// 		}
-	// 	})
+	t.Run("getAmountOut Dola2pool - real", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 1e5,
+			Tokens: []common.Address{
+				common.HexToAddress("0x3129662808bEC728a27Ab6a6b9AFd3cBacA8A43c"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x3129662808bEC728a27Ab6a6b9AFd3cBacA8A43c"): 437887754357325037952575.0,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 360566983460605909192520.0,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0x3129662808bEC728a27Ab6a6b9AFd3cBacA8A43c"): 437887754357325037952575.0,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 161397058812000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 199174361159550727368681.0,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 14321362274457000000000000.0,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 17673483042002634356152881.0,
+			},
+			MetaTokenSupply: 31994451648283811191765856.,
+		}
+		scaleIn := 1e12
+		scaleOut := 1.
+		var amountIn float64 = 2564441787.
+		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		tokenOut := common.HexToAddress("0x3129662808bEC728a27Ab6a6b9AFd3cBacA8A43c")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 2568384124963231214266.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e10) {
+			fmt.Println("\tamountOut - Dola2pool (USDC->Dola): \tPASS")
+		}
+	})
+
+	t.Run("getAmountOut FRAX2pool - real", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 1.569079573847554e25,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 1.5100598984894187e25,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 1.569079573847554e25,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 6803881052428000000000000,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 8296883192305614810216765,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1.4382158959524e25,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.7538092159584697e25,
+			},
+			MetaTokenSupply: 31919901790061285563770648.,
+		}
+		scaleIn := 1e12
+		scaleOut := 1.
+		var amountIn float64 = 2537966262.
+		tokenIn := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		tokenOut := common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 2537520926880207836577.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1e11) {
+			fmt.Println("\tamountOut - FRAX2pool (USDC->FRAX): \tPASS")
+		}
+	})
+
+	t.Run("getAmountOut FRAX2pool - real 2", func(t *testing.T) {
+		assert := assert.New(t)
+		metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 2e5,
+			Tokens: []common.Address{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 15682959320533548536954880.,
+				common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40"): 15108333484194851410935808,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 15682959320533548536954880.,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 8294023591558666479985323.,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 6814472074925.,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 17519210297027796999864320.,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 14393999248488000000000000.,
+			},
+			MetaTokenSupply: 31912866972867481066065137.,
+		}
+		scaleIn := 1.
+		scaleOut := 1e12
+		var amountIn float64 = 2603671150225096441856.
+		tokenIn := common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355")
+		tokenOut := common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75")
+		amountOut := b.getAmountOutCurveMeta(amountIn, scaleIn, scaleOut, tokenIn, tokenOut, metaAddr, baseAddr, poolsInfoOverride)
+		var expectedOut float64 = 2600968158.
+		// fmt.Printf("amountOut: %v\n", amountOut)
+		if assert.InDelta(expectedOut, amountOut, 1) {
+			fmt.Println("\tamountOut - FRAX2pool (FRAX->USDC): \tPASS")
+		}
+	})
 
 }

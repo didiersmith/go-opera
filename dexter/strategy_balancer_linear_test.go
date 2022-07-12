@@ -531,3 +531,464 @@ func TestBalancerLinearStrategy(t *testing.T) {
 	// 	})
 
 }
+
+func TestRoutes(t *testing.T) {
+	fmt.Println("Testing real routes")
+	logger.SetTestMode(t)
+	logger.SetLevel("debug")
+
+	root := "/home/ubuntu/dexter/carb/"
+	s := NewBalancerLinearStrategy(
+		"Curve 2-3", 0, nil, BalancerLinearStrategyConfig{
+			RoutesFileName:          root + "route_caches/curve_no_lending_routes_len2-3.json",
+			PoolToRouteIdxsFileName: root + "route_caches/curve_no_lending_poolToRouteIdxs_len2-3.json",
+		})
+	b := s.(*BalancerLinearStrategy)
+
+	t.Run("loadJson", func(t *testing.T) {
+		assert := assert.New(t)
+		assert.Greater(len(b.interestedPools), 0, "No intereseted pools")
+		assert.Greater(len(b.routeCache.Routes), 0, "No routes in routeCache")
+		assert.Greater(len(b.routeCache.PoolToRouteIdxs), 0, "No poolToRouteIdxs in routeCache")
+	})
+
+	// t.Run("getRouteAmountOut", func(t *testing.T) {
+	// 	assert := assert.New(t)
+	// 	amountIn := 1e18
+	// 	metaAddr := common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60")
+	// 	baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+	// 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+	// 	poolsInfoOverride[common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142")] = &PoolInfoFloat{
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 2962811047128465131175936.,
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 783135597890467046359040.,
+	// 		},
+	// 		FeeNumerator: 998000.,
+	// 	}
+	// 	poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+	// 		Fee:                4e-4,
+	// 		AmplificationParam: 4e5,
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 10058455937184196793991168.,
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 10151745989950219382423552.,
+	// 		},
+	// 		UnderlyingReserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 10058455937184196793991168.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 4679551411510000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 5606950796274906192412672.,
+	// 		},
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 1.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 1.,
+	// 		},
+	// 	}
+	// 	poolsInfoOverride[common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c")] = &PoolInfoFloat{
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 38557576324656002762801152.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 10182021652897.,
+	// 		},
+	// 		FeeNumerator: 998000.,
+	// 	}
+	// 	poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+	// 		Fee:                4e-4,
+	// 		AmplificationParam: 45e4,
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 14514088536827000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 17390508859158454610165760.,
+	// 		},
+	// 		MetaTokenSupply: 31486637744609122874032128.,
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 		},
+	// 	}
+	// 	var poolId0 BalPoolId
+	// 	copy(poolId0[:], common.FromHex("0x41d88635029c4402BF9914782aE55c412f8F2142"))
+	// 	var poolId1 BalPoolId
+	// 	copy(poolId1[:], common.FromHex("0x24699312CB27C26Cfc669459D670559E5E44EE60"))
+	// 	var poolId2 BalPoolId
+	// 	copy(poolId2[:], common.FromHex("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"))
+	// 	route := []*Leg{
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 			To:       common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 			PoolAddr: common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142"),
+	// 			PoolId:   poolId0,
+	// 			Type:     UniswapV2Pair,
+	// 		},
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 			To:       common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			PoolAddr: common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60"),
+	// 			PoolId:   poolId1,
+	// 			Type:     CurveFactoryMetaPool,
+	// 		},
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			To:       common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 			PoolAddr: common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"),
+	// 			PoolId:   poolId2,
+	// 			Type:     UniswapV2Pair,
+	// 		},
+	// 	}
+	// 	amountOut := b.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, false)
+	// 	expectedOut := 1.
+	// 	if assert.InDelta(expectedOut, amountOut, 1e1) {
+	// 		fmt.Println("\tgetRouteAmountOut - Real 1: \tPASS")
+	// 	}
+	// })
+
+	// t.Run("getRouteAmountOut - real", func(t *testing.T) {
+	// 	assert := assert.New(t)
+	// 	amountIn := 286193.
+	// 	metaAddr := common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320")
+	// 	baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+	// 	poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+	// 	poolsInfoOverride[common.HexToAddress("0xecaa1cbd28459d34b766f9195413cb20122fb942")] = &PoolInfoFloat{
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1025331860426000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1325388554941570995978240.,
+	// 		},
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 		},
+	// 		Fee:                0.0001,
+	// 		AmplificationParam: 3.25e6,
+	// 	}
+	// 	poolsInfoOverride[common.HexToAddress("0x872686b519e06b216eef150dc4914f35672b0954")] = &PoolInfoFloat{
+	// 		Fee:                8e-4,
+	// 		AmplificationParam: 4e5,
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 			common.HexToAddress("0x9879aBDea01a879644185341F7aF7d8343556B7a"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 79789860912799846236160.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 64748669682000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 70455936961817320882176.,
+	// 			common.HexToAddress("0x9879aBDea01a879644185341F7aF7d8343556B7a"): 94895150024113730355200.,
+	// 		},
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 1.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 			common.HexToAddress("0x9879aBDea01a879644185341F7aF7d8343556B7a"): 1.,
+	// 		},
+	// 	}
+	// 	poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+	// 		Fee:                4e-4,
+	// 		AmplificationParam: 2e5,
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 15748956672449094447267840.,
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 15043229934983666754125824.,
+	// 		},
+	// 		UnderlyingReserves: map[common.Address]float64{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 15748956672449094447267840.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 7267407512071000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 7775841495766765876971168.,
+	// 		},
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"): 1.,
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 			common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 1.,
+	// 		},
+	// 	}
+	// 	poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+	// 		Fee:                4e-4,
+	// 		AmplificationParam: 45e4,
+	// 		Tokens: []common.Address{
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 		},
+	// 		Reserves: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 15468238542975000000000000.,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 16550409610180504934416384.,
+	// 		},
+	// 		MetaTokenSupply: 32018607557735197246319879.,
+	// 		ScaleFactors: map[common.Address]float64{
+	// 			common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 			common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 		},
+	// 	}
+	// 	var poolId0 BalPoolId
+	// 	copy(poolId0[:], common.FromHex("0x872686b519e06b216eef150dc4914f35672b0954"))
+	// 	var poolId1 BalPoolId
+	// 	copy(poolId1[:], common.FromHex("0x7a656b342e14f745e2b164890e88017e27ae7320"))
+	// 	var poolId2 BalPoolId
+	// 	copy(poolId2[:], common.FromHex("0xecaa1cbd28459d34b766f9195413cb20122fb942000200000000000000000120"))
+	// 	route := []*Leg{
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			To:       common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+	// 			PoolAddr: common.HexToAddress("0x872686b519e06b216eef150dc4914f35672b0954"),
+	// 			PoolId:   poolId0,
+	// 			Type:     CurveFactoryPlainPool,
+	// 		},
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0xdc301622e621166BD8E82f2cA0A26c13Ad0BE355"),
+	// 			To:       common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 			PoolAddr: common.HexToAddress("0x7a656b342e14f745e2b164890e88017e27ae7320"),
+	// 			PoolId:   poolId1,
+	// 			Type:     CurveFactoryMetaPool,
+	// 		},
+	// 		&Leg{
+	// 			From:     common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 			To:       common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			PoolAddr: common.HexToAddress("0xecaa1cbd28459d34b766f9195413cb20122fb942"),
+	// 			PoolId:   poolId2,
+	// 			Type:     BalancerStablePool,
+	// 		},
+	// 	}
+	// 	amountOut := b.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, true)
+	// 	fmt.Printf("AmountOut: %v\n", amountOut)
+	// 	expectedOut := 1.
+	// 	if assert.InDelta(expectedOut, amountOut, 1e1) {
+	// 		fmt.Println("\tgetRouteAmountOut - Real 1: \tPASS")
+	// 	}
+	// })
+
+	t.Run("getRouteAmountOut - real", func(t *testing.T) {
+		assert := assert.New(t)
+		amountIn := 8284725489774880620544.
+		metaAddr := common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60")
+		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+		poolsInfoOverride[common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142")] = &PoolInfoFloat{
+			Tokens: []common.Address{
+				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 2972963125939768177721344.,
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 781330835888820254146560.,
+			},
+			FeeNumerator: 998000,
+		}
+		poolsInfoOverride[common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c")] = &PoolInfoFloat{
+			Tokens: []common.Address{
+				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 37873675489539462648561664.,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 9975496715634.,
+			},
+			FeeNumerator: 998000,
+		}
+		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 4e5,
+			Tokens: []common.Address{
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 11470151825951430207864832.,
+				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 10004106825441685450784768.,
+			},
+			UnderlyingReserves: map[common.Address]float64{
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 11470151825951430207864832.,
+				// common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 4813006893847000000000000.,
+				// common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 5191115797578750404765152.,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 4876964125825000000000000.,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 5260097497504417841152000.,
+			},
+			ScaleFactors: map[common.Address]float64{
+				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 1.,
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 1.,
+			},
+		}
+		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+			Fee:                4e-4,
+			AmplificationParam: 45e4,
+			Tokens: []common.Address{
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+			},
+			Reserves: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 15215160089020000000000000.,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 16410460164054314372825088.,
+			},
+			MetaTokenSupply: 31210827672632268991496192.,
+			// MetaTokenSupply: 31625570096592344632047385.,
+			ScaleFactors: map[common.Address]float64{
+				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+			},
+		}
+		var poolId0 BalPoolId
+		copy(poolId0[:], common.FromHex("0x41d88635029c4402BF9914782aE55c412f8F2142"))
+		var poolId1 BalPoolId
+		copy(poolId1[:], common.FromHex("0x24699312CB27C26Cfc669459D670559E5E44EE60"))
+		var poolId2 BalPoolId
+		copy(poolId2[:], common.FromHex("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"))
+		route := []*Leg{
+			&Leg{
+				From:     common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+				To:       common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+				PoolAddr: common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142"),
+				PoolId:   poolId0,
+				Type:     UniswapV2Pair,
+			},
+			&Leg{
+				From:     common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+				To:       common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+				PoolAddr: common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60"),
+				PoolId:   poolId1,
+				Type:     CurveFactoryMetaPool,
+			},
+			&Leg{
+				From:     common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+				To:       common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+				PoolAddr: common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"),
+				PoolId:   poolId2,
+				Type:     UniswapV2Pair,
+			},
+		}
+		amountOut := b.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, true)
+		fmt.Printf("AmountOut: %v\n", amountOut)
+		expectedOut := 1.
+		if assert.InDelta(expectedOut, amountOut, 1e1) {
+			fmt.Println("\tgetRouteAmountOut - Real 1: \tPASS")
+		}
+	})
+
+	// 	t.Run("getRouteAmountOut - fired on", func(t *testing.T) {
+	// 		assert := assert.New(t)
+	// 		amountIn := 2609301286.642
+	// 		metaAddr := common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60")
+	// 		baseAddr := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+	// 		poolsInfoOverride := make(map[common.Address]*PoolInfoFloat)
+	// 		poolsInfoOverride[common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142")] = &PoolInfoFloat{
+	// 			Tokens: []common.Address{
+	// 				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 			},
+	// 			Reserves: map[common.Address]float64{
+	// 				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 2.979083134807499e+24,
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 7.797650700438082e+23,
+	// 			},
+	// 			FeeNumerator: 998000,
+	// 		}
+	// 		poolsInfoOverride[common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c")] = &PoolInfoFloat{
+	// 			Tokens: []common.Address{
+	// 				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			},
+	// 			Reserves: map[common.Address]float64{
+	// 				common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"): 3.7980274190414885e+25,
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 9.951411255325e+12,
+	// 			},
+	// 			FeeNumerator: 998000,
+	// 		}
+	// 		poolsInfoOverride[metaAddr] = &PoolInfoFloat{
+	// 			Fee:                4e-4,
+	// 			AmplificationParam: 4e5,
+	// 			Tokens: []common.Address{
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"),
+	// 			},
+	// 			Reserves: map[common.Address]float64{
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 1.147172799934631e+25,
+	// 				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 1.0042724632062928e+25,
+	// 			},
+	// 			UnderlyingReserves: map[common.Address]float64{
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 1.147172799934631e+25,
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 4.899478545401e+24,
+	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 5.276714785148397e+24,
+	// 			},
+	// 			ScaleFactors: map[common.Address]float64{
+	// 				common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"): 1.,
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 				common.HexToAddress("0x27E611FD27b276ACbd5Ffd632E5eAEBEC9761E40"): 1.,
+	// 			},
+	// 		}
+	// 		poolsInfoOverride[baseAddr] = &PoolInfoFloat{
+	// 			Fee:                4e-4,
+	// 			AmplificationParam: 45e4,
+	// 			Tokens: []common.Address{
+	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"),
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 			},
+	// 			Reserves: map[common.Address]float64{
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1.524547385311e+25,
+	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.6418842575371898e+25,
+	// 			},
+	// 			// MetaTokenSupply: 31210827672632268991496192., actual
+	// 			MetaTokenSupply: 3.1248593391051292e+25,
+	// 			ScaleFactors: map[common.Address]float64{
+	// 				common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"): 1e12,
+	// 				common.HexToAddress("0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E"): 1.,
+	// 			},
+	// 		}
+	// 		var poolId0 BalPoolId
+	// 		copy(poolId0[:], common.FromHex("0x41d88635029c4402BF9914782aE55c412f8F2142"))
+	// 		var poolId1 BalPoolId
+	// 		copy(poolId1[:], common.FromHex("0x24699312CB27C26Cfc669459D670559E5E44EE60"))
+	// 		var poolId2 BalPoolId
+	// 		copy(poolId2[:], common.FromHex("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"))
+	// 		route := []*Leg{
+	// 			&Leg{
+	// 				From:     common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 				To:       common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 				PoolAddr: common.HexToAddress("0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c"),
+	// 				PoolId:   poolId2,
+	// 				Type:     UniswapV2Pair,
+	// 			},
+	// 			&Leg{
+	// 				From:     common.HexToAddress("0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83"),
+	// 				To:       common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 				PoolAddr: common.HexToAddress("0x41d88635029c4402BF9914782aE55c412f8F2142"),
+	// 				PoolId:   poolId0,
+	// 				Type:     UniswapV2Pair,
+	// 			},
+	// 			&Leg{
+	// 				From:     common.HexToAddress("0x74E23dF9110Aa9eA0b6ff2fAEE01e740CA1c642e"),
+	// 				To:       common.HexToAddress("0x04068DA6C83AFCFA0e13ba15A6696662335D5B75"),
+	// 				PoolAddr: common.HexToAddress("0x24699312CB27C26Cfc669459D670559E5E44EE60"),
+	// 				PoolId:   poolId1,
+	// 				Type:     CurveFactoryMetaPool,
+	// 			},
+	// 		}
+	// 		amountOut := b.getRouteAmountOutBalancer(route, amountIn, poolsInfoOverride, true)
+	// 		fmt.Printf("AmountOut: %v\n", amountOut)
+	// 		expectedOut := 1.
+	// 		if assert.InDelta(expectedOut, amountOut, 1e1) {
+	// 			fmt.Println("\tgetRouteAmountOut - Real 1: \tPASS")
+	// 		}
+	// 	})
+
+}
