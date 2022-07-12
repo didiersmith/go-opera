@@ -56,7 +56,8 @@ const (
 var (
 	// fishAddr         = common.HexToAddress("0x58b9fC2F82f07E67296f0d30124e4378616e8295")
 	// fishAddr = common.HexToAddress("0xa50B5c30537E000482A041cC2C5C62331739A3aC")
-	fishAddr         = common.HexToAddress("0xD4e83785632Ecb6c7b2ad8267C40d08CF1453391")
+	// fishAddr         = common.HexToAddress("0xD4e83785632Ecb6c7b2ad8267C40d08CF1453391")
+	fishAddr         = common.HexToAddress("0x8FA7599C61564B6268B050AE528213992bCc6B4B")
 	hanselAddr       = common.HexToAddress("0x0a81c8e5c85D8bACFe9b038c6F7fC2C5186C47B3")
 	hanselSearchAddr = common.HexToAddress("0xDFc41cC7D14F39e15DEc0CF959a9A0DA8F9C3921")
 
@@ -355,15 +356,15 @@ func NewDexter(svc *Service) *Dexter {
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
 			}),
 
-			// 			dexter.NewBalancerLinearStrategy("Curve 2-3", 0, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-			// 				RoutesFileName:          root + "route_caches/curve_no_lending_routes_len2-3.json",
-			// 				PoolToRouteIdxsFileName: root + "route_caches/curve_no_lending_poolToRouteIdxs_len2-3.json",
-			// 			}),
-
-			dexter.NewBalancerLinearStrategy("Curve 2-4", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/curve_plain_routes_len2-4.json",
-				PoolToRouteIdxsFileName: root + "route_caches/curve_plain_poolToRouteIdxs_len2-4.json",
+			dexter.NewBalancerLinearStrategy("Curve 2-3", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/curve_no_lending_routes_len2-3.json",
+				PoolToRouteIdxsFileName: root + "route_caches/curve_no_lending_poolToRouteIdxs_len2-3.json",
 			}),
+
+			// dexter.NewBalancerLinearStrategy("Curve 2-3 plain", 0, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			// 	RoutesFileName:          root + "route_caches/curve_plain_routes_len2-3.json",
+			// 	PoolToRouteIdxsFileName: root + "route_caches/curve_plain_poolToRouteIdxs_len2-3.json",
+			// }),
 		}
 	}
 
@@ -1448,8 +1449,8 @@ func getAmountsFromSwapLog(l *types.Log) (*common.Address, *big.Int, *big.Int, *
 
 func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	p.Log.RecordTime(dexter.PrepAndFirePlanStarted)
-	log.Info("Ready to fire gun, returning")
-	return
+	// log.Info("Ready to fire gun, returning")
+	// return
 	bravado := d.strategyBravado[p.StrategyID]
 	probAdjustedPayoff := new(big.Int).Mul(p.Response.NetProfit, big.NewInt(int64(d.accuracy*bravado)))
 	failCost := new(big.Int).Mul(p.Response.GasPrice, big.NewInt(dexter.GAS_FAIL))
