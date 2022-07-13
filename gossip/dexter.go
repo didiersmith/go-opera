@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"math/big"
@@ -1640,7 +1639,7 @@ func (d *Dexter) prepAndFirePlan(p *dexter.RailgunPacket) {
 	p.Log.RecordTime(dexter.GunFireComplete)
 	var method [4]byte
 	copy(method[:], p.Target.Data()[:4])
-	fmt.Printf("Fired: %s source: %s  method: %v \n%s\n", signedTx.Hash().Hex(), p.Target.Hash().Hex(), method, p.Log.Format())
+	// fmt.Printf("Fired: %s source: %s  method: %v \n%s\n", signedTx.Hash().Hex(), p.Target.Hash().Hex(), method, p.Log.Format())
 	go d.accountFiredGun(wallet, signedTx, p, gun.ValidatorIDs, label, lag)
 }
 

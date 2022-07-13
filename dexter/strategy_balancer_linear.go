@@ -708,11 +708,12 @@ func (s *BalancerLinearStrategy) runScoreUpdater() {
 				break loop
 			}
 		}
-		hits, misses, numRoutes := s.refreshScoresForPools(r.refreshKeys, r.poolsInfoCombinedUpdates, start)
+		// hits, misses, numRoutes := s.refreshScoresForPools(r.refreshKeys, r.poolsInfoCombinedUpdates, start)
+		s.refreshScoresForPools(r.refreshKeys, r.poolsInfoCombinedUpdates, start)
 		lag := time.Now().Sub(start)
 		meanRefreshTime = time.Duration(float64(lag)*mrtAlpha + float64(meanRefreshTime)*(1-mrtAlpha))
 		if lag > time.Second {
-			log.Info("Score updater done computing updates", "name", s.Name, "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.scoreUpdateRequestChan), "updates", len(r.poolsInfoCombinedUpdates), "meanRefreshTime", meanRefreshTime, "hits", hits, "misses", misses, "routes", numRoutes)
+			// log.Info("Score updater done computing updates", "name", s.Name, "t", utils.PrettyDuration(time.Now().Sub(start)), "queue", len(s.scoreUpdateRequestChan), "updates", len(r.poolsInfoCombinedUpdates), "meanRefreshTime", meanRefreshTime, "hits", hits, "misses", misses, "routes", numRoutes)
 		}
 	}
 }
@@ -957,20 +958,28 @@ func (s *BalancerLinearStrategy) processPotentialTx(ptx *PossibleTx) {
 	}
 	s.routeCache.LastFiredTime[plan.RouteIdx] = time.Now()
 	if BigIntToFloat(plan.NetProfit)/1e18 >= 1 {
-		log.Warn("Very profitable plan", "amountIn", plan.AmountIn, "profit", BigIntToFloat(plan.NetProfit)/1e18)
-		for i, poolInfo := range plan.Path {
-			poolAddr := common.BytesToAddress(poolInfo.PoolId[:20])
-			s.mu.RLock()
-			poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, poolAddr)
-			s.mu.RUnlock()
-			log.Info("info", "addr", poolAddr, "pool", poolInfo, "tokenFrom", plan.Path[i].TokenFrom, "tokenTo", plan.Path[i].TokenTo)
+		usesMetaPools := false
+		for _, poolInfo := range plan.Path {
+			if poolInfo.PoolType == CurveFactoryMetaPool {
+				usesMetaPools = true
+			}
 		}
-		pool := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
-		s.mu.RLock()
-		log.Info("2pool info", "addr", pool, "pool", getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, pool))
-		s.mu.RUnlock()
-		route := s.routeCache.Routes[plan.RouteIdx]
-		s.getRouteAmountOutBalancer(route, BigIntToFloat(plan.AmountIn), poolsInfoOverride, true)
+		if usesMetaPools {
+			log.Warn("Very profitable plan", "amountIn", plan.AmountIn, "profit", BigIntToFloat(plan.NetProfit)/1e18)
+			for i, poolInfo := range plan.Path {
+				poolAddr := common.BytesToAddress(poolInfo.PoolId[:20])
+				s.mu.RLock()
+				poolInfo := getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, poolAddr)
+				s.mu.RUnlock()
+				log.Info("info", "addr", poolAddr, "pool", poolInfo, "tokenFrom", plan.Path[i].TokenFrom, "tokenTo", plan.Path[i].TokenTo)
+			}
+			pool := common.HexToAddress("0x27e611fd27b276acbd5ffd632e5eaebec9761e40")
+			s.mu.RLock()
+			log.Info("2pool info", "addr", pool, "pool", getPoolInfoFloat(s.poolsInfo, s.poolsInfoPending, poolsInfoOverride, pool))
+			s.mu.RUnlock()
+			route := s.routeCache.Routes[plan.RouteIdx]
+			s.getRouteAmountOutBalancer(route, BigIntToFloat(plan.AmountIn), poolsInfoOverride, true)
+		}
 	}
 	log.Info("strategy_balancer_linear final route", "strategy", s.Name, "profitable", len(pop), "/", candidateRoutes, "strategy time", utils.PrettyDuration(time.Now().Sub(start)), "total time", utils.PrettyDuration(time.Now().Sub(ptx.StartTime)), "hash", ptx.Tx.Hash().Hex(), "gasPrice", ptx.Tx.GasPrice(), "tier", maxScoreTier, "amountIn", BigIntToFloat(plan.AmountIn)/1e18, "amountInUSDC", BigIntToFloat(plan.AmountIn)/1e6, "profit", BigIntToFloat(plan.NetProfit)/1e18)
 	ptx.Log.RecordTime(StrategyFinished)
