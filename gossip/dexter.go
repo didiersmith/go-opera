@@ -377,17 +377,22 @@ func NewDexter(svc *Service) *Dexter {
 				PoolToRouteIdxsFileName: root + "route_caches/solidly_pairToRouteIdxs_len2-4.json",
 			}),
 
-			dexter.NewBalancerLinearStrategy("Balancer 2-4 Sans", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			dexter.NewBalancerLinearStrategy("Balancer Sans 2-4", 1, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/balancer_no_wftm_routes_len2-4.json",
 				PoolToRouteIdxsFileName: root + "route_caches/balancer_no_wftm_poolToRouteIdxs_len2-4.json",
 			}),
 
-			dexter.NewBalancerLinearStrategy("Balancer Stable", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
-				RoutesFileName:          root + "route_caches/solidly_balancer_routes_len2-4.json",
-				PoolToRouteIdxsFileName: root + "route_caches/solidly_balancer_poolToRouteIdxs_len2-4.json",
+			dexter.NewBalancerLinearStrategy("Balancer Stable 2-3", 2, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/balancer_stable_routes_len2-3.json",
+				PoolToRouteIdxsFileName: root + "route_caches/balancer_stable_poolToRouteIdxs_len2-3.json",
 			}),
 
-			dexter.NewBalancerLinearStrategy("Curve 2-3", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+			dexter.NewBalancerLinearStrategy("Balancer Weighted 4", 3, d.railgunChan, dexter.BalancerLinearStrategyConfig{
+				RoutesFileName:          root + "route_caches/balancer_routes_len4.json",
+				PoolToRouteIdxsFileName: root + "route_caches/balancer_poolToRouteIdxs_len4.json",
+			}),
+
+			dexter.NewBalancerLinearStrategy("Curve 2-3", 4, d.railgunChan, dexter.BalancerLinearStrategyConfig{
 				RoutesFileName:          root + "route_caches/curve_no_lending_routes_len2-3.json",
 				PoolToRouteIdxsFileName: root + "route_caches/curve_no_lending_poolToRouteIdxs_len2-3.json",
 			}),
