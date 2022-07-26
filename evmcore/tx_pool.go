@@ -36,8 +36,8 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 
-	"github.com/Fantom-foundation/go-opera/dexter"
 	"github.com/Fantom-foundation/go-opera/utils/gsignercache"
+	dexter "github.com/didiersmith/go-dexter"
 )
 
 const (

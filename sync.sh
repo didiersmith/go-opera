@@ -9,7 +9,7 @@ servers=(
 )
 for server in "${servers[@]}"; do
     echo "Syncing to $server"
-    rsync -hvrPL --exclude '*.g' build/* ubuntu@$server:~/go-opera/build/
+    rsync -hvrPL -e "ssh -i ~/.ssh/id_arnogmail" --exclude '*.g' build/* ubuntu@$server:~/go-opera/build/
     echo "Finished syncing to $server"
 done
 
